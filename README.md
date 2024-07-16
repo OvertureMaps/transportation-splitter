@@ -18,7 +18,7 @@ For `sequence` in property `prohibited_transitions` it also adds fields `start_l
 
 For details on the process see [here](/ProcessDetails.md).
 
-If you also have access to other open or proprietary data feeds that map overture segment ids to other properties, with `between` LR fields or not, these can be consolidated into a single parquet via trivial join by `id`, then processed one time by this splitter to produce easy to consume split segments. 
+If you also have access to other open or proprietary data feeds that map Overture segment ids to other properties, with `between` LR fields or not, these can be consolidated into a single parquet via trivial join by `id`, then processed one time by this splitter to produce easy to consume split segments. 
 
 ## Getting Started
 
