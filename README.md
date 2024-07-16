@@ -22,7 +22,7 @@ If you also have access to other open or proprietary data feeds that map Overtur
 
 ## Getting Started
 
-Any Spark environment should work, but for reference this was tested on Databricks on Azure and AWS Glue.
+Any Spark environment should work, but for reference this was tested on Databricks on Azure (Runtime: 13.3 LTS - Apache Spark 3.4.1, Scala 2.12) and AWS Glue.
 
 ### Dependencies
 
