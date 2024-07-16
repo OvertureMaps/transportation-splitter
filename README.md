@@ -4,7 +4,7 @@ Pyspark app for splitting [Overture](https://github.com/OvertureMaps/data) trans
 
 ## Description
 
-Working with multiple connectors and linearly referenced properties can be difficult. The purpose of this notebook is to offer one option in how overture transportation features can be consumed, by first splitting them into simpler sub-segments. 
+Working with multiple connectors and linearly referenced properties can be difficult. The purpose of this notebook is to offer one option in how Overture transportation features can be consumed, by first splitting them into simpler sub-segments. 
 
 There are multiple ways this can be done, current behavior is to output for each input segment all its corresponding sub-segments "split" at all its connectors and all `between` length-relative location references (LRs).
 
