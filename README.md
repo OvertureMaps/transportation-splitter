@@ -12,7 +12,7 @@ The result is a transportation data set where segments have exactly two connecto
 
 New "artificial" connector features are added for all LRs that don't already have connectors. 
 
-Result is using same overture schema as the input, except for segments two columns are added: `start_lr` and `end_lr`. 
+Result is using same Overture schema as the input, except for segments two columns are added: `start_lr` and `end_lr`. 
 
 For `sequence` in property `prohibited_transitions` it also adds fields `start_lr` and `end_lr` to identify to which of the splits the `segment_id` refers to. 
 
