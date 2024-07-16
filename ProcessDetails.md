@@ -41,7 +41,7 @@ After split, `prohibited_transitions` property has to be fixed:
 1. Any original turn restriction applies to exactly one split, we need to identify to which and remove it from the other splits.
 2. All turn restrictions sequences have a reference to a `segment_id`. We need to identify which split for that segment id and fully qualify the reference from the turn restriction.
 
-Part 1 is partially resolved in the UDF at step 3 because we can do an early prunning of the references we need to fix for part 2 - all splits that don't start or end with the connerctor at first position in the turn restriction's `sequence` are dropped.
+Part 1 is partially resolved in the UDF at step 3 because we can do an early pruning of the references we need to fix for part 2 - all splits that don't start or end with the connector at first position in the turn restriction's `sequence` are dropped.
 Part 2 is addressed by first joining the turn restriction reference with the segment corpus by segment id to get the all the splits and their corresponding two connectors ids. The will be at most two splits that share the referenced connector. To identify which of the two splits:
 - if last reference in the sequence, `final_heading` is used to identify at which position in the `connector_ids` for the split segment do we expect the referenced `connector_id`.
 - for all other, the split segment's `connector_ids` must consist of the `connector_id` from the turn restriction at that position in the sequence and the `connector_id` from the sequence in the very next position.
