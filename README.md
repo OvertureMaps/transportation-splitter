@@ -2,6 +2,8 @@
 
 Pyspark app for splitting [Overture](https://github.com/OvertureMaps/data) transportation segments to simplify consuming the data.
 
+Note: This repository and project are experimental. Things are likely change until a stable release, but we will keep the documentation here up-to-date.
+
 ## Description
 
 Working with multiple connectors and linearly referenced properties can be difficult. The purpose of this notebook is to offer one option in how Overture transportation features can be consumed, by first splitting them into simpler sub-segments. 
