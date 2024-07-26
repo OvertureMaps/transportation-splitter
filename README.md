@@ -28,12 +28,13 @@ Any Spark environment should work, but for reference this was tested on Databric
 
 ### Dependencies
 
-pip install apache-sedona shapely
+pip install apache-sedona shapely pyproj
 
 Following packages versions were used:
 ```
 apache-sedona = "1.5.1"
 shapely = "2.0.2"
+pyproj = "3.6.1"
 ```
 
 ### Installing
@@ -65,6 +66,8 @@ For simplicity all the code and parameters are currently included in one [notebo
 
 The list of columns that are considered for identifying the LRs values to split at is constructed at runtime out of input parquet's schema columns that have a `between` field anywhere in their structure.
 If you want to customize that behavior please set constants `LR_COLUMNS_TO_INCLUDE` or `LR_COLUMNS_TO_EXCLUDE`.
+
+If you are using databricks you can also add this repo as a git folder, see instructions [here](https://docs.databricks.com/en/repos/repos-setup.html).
 
 ## Version History
 
