@@ -1,22 +1,24 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC Please see instructions and details [here](https://github.com/OvertureMaps/tf-data-platform/blob/dev/splitrefs/datapipelines/examples/TransportationSplitter.md).
+# MAGIC Please see instructions and details [here](https://github.com/OvertureMaps/transportation-splitter/blob/main/README.md).
 # MAGIC
 # MAGIC # AWS Glue notebook - see instructions for magic commands
 
 # COMMAND ----------
+
 from lib import *
 
 # COMMAND ----------
 
+from split_tests import *
 # Run the tests before starting splitter
 unittest.main(argv=[''], verbosity=2, exit=False)
 
 # COMMAND ----------
 
-overture_release_version = "2024-06-13-beta.0"
+overture_release_version = "2024-07-22.0"
 overture_release_path = "wasbs://release@overturemapswestus2.blob.core.windows.net" #  "s3://overturemaps-us-west-2/release"
-base_output_path = "wasbs://test@ovtpipelinedev.blob.core.windows.net/transportation-splits-jun" # "s3://<bucket>/transportation-split"
+base_output_path = "wasbs://test@ovtpipelinedev.blob.core.windows.net/transportation-splits" # "s3://<bucket>/transportation-split"
 
 wkt_filter = None
 
