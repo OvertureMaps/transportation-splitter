@@ -1,3 +1,4 @@
+from collections import deque
 from pyspark.sql.functions import expr, lit, col, explode, collect_list, struct, udf, struct, count, when, size, split, element_at, coalesce
 from pyspark.sql.types import *
 from pyspark.sql.utils import AnalysisException
@@ -12,6 +13,7 @@ import json
 import os
 import unittest
 
+SPLIT_AT_CONNECTORS = True
 PROHIBITED_TRANSITIONS_COLUMN = "prohibited_transitions"
 
 # List of columns that are considered for identifying the LRs values to split at is constructed at runtime out of input parquet's schema columns that have LR_SCOPE_KEY = "between" anywhere in their structure. The include/exclude constants below are applied to that list.
@@ -22,17 +24,21 @@ LR_COLUMNS_TO_EXCLUDE = []
 
 LR_SCOPE_KEY = "between"
 POINT_PRECISION = 7
-SPLIT_POINT_THRESHOLD = 0.0037 # New split points are needed for linear references. How far from existing overture connectors do these LRs need to be for us to create a new connector for them instead of using the existing connector.
+LR_SPLIT_POINT_MIN_DIST_METERS = 0.001 # New split points are needed for linear references. How far in meters from other existing splits (from either connectors or other LRs) do these LRs need to be for us to create a new connector for them instead of using the existing connector.
+IS_ON_SUB_SEGMENT_THRESHOLD_METERS = 0.001 # 1mm -> max distance from a connector point to a sub-segment for the connector to be considered "on" that sub-segment
+
 class SplitPoint:
     """POCO to represent a segment split point."""
-    def __init__(self, id=None, geometry=None, lr=None, is_lr_added=False):
+    def __init__(self, id=None, geometry=None, lr=None, lr_meters=None, is_lr_added=False, at_coord_idx=None):
         self.id = id
         self.geometry = geometry
         self.lr = lr
+        self.lr_meters = lr_meters
         self.is_lr_added = is_lr_added
+        self.at_coord_idx = at_coord_idx
 
     def __repr__(self):
-        return f"SplitPoint(id={self.id!r}, geometry={self.geometry!r}, lr={self.lr!r}), is_lr_added={self.is_lr_added!r}"
+        return f"SplitPoint(id={self.id!r}, at_coord_idx={self.at_coord_idx!r}, geometry={str(self.geometry)!r}, lr={self.lr!r}) ({self.lr_meters!r}m), is_lr_added={self.is_lr_added!r}"
 
 class SplitSegment:
     """POCO to represent a split segment."""
@@ -43,7 +49,7 @@ class SplitSegment:
         self.end_split_point = end_split_point
 
     def __repr__(self):
-        return f"SplitSegment(id={self.id!r}, geometry={self.geometry!r}, start_split_point={self.start_split_point!r}, end_split_point={self.end_split_point!r})"
+        return f"SplitSegment(id={self.id!r}, geometry={str(self.geometry)!r}, start_split_point={self.start_split_point!r}, end_split_point={self.end_split_point!r})"
 
 
 def read_parquet(spark, path, merge_schema=False):
@@ -171,8 +177,7 @@ def has_consecutive_dupe_coords(line: LineString) -> bool:
     coordinates = list(line.coords)
     return any(coordinates[i] == coordinates[i - 1] for i in range(1, len(coordinates)))
 
-def remove_consecutive_dupe_coords(line: LineString) -> LineString:
-    coordinates = list(line.coords)
+def get_split_line_geometry(coordinates):
     filtered_coords = [coordinates[i] for i in range(len(coordinates)) if i == 0 or coordinates[i] != coordinates[i - 1]]
     return LineString(filtered_coords)
 
@@ -182,31 +187,26 @@ def are_different_coords(coords1, coords2):
 def round_point(point, precision=POINT_PRECISION):
     return Point(round(point.x, precision), round(point.y, precision))
 
-def split_line(original_line_geometry: LineString, split_points: [SplitPoint] ) -> [SplitSegment]:
+def split_line(original_line_geometry: LineString, split_points: list[SplitPoint] ) -> list[SplitSegment]:
     """Split the LineString into segments at the given points"""
 
     # Special case to avoid processing when there are only start/end split points
     if len(split_points) == 2 and split_points[0].lr == 0 and split_points[1].lr == 1:
         return [SplitSegment(0, original_line_geometry, split_points[0], split_points[1])]
 
-    original_coordinates = list(original_line_geometry.coords)
     split_segments = []
-    last_coordinate_index = 0
-    last_coordinate_dist = 0.0
-    last_segment_coordinates = [split_points[0].geometry.coords[0]] # initialize first split segment with first split point
+    i=0
+    for split_point_start, split_point_end in zip(split_points[:-1], split_points[1:]):
+        idx_start = split_point_start.at_coord_idx + 1
+        idx_end = split_point_end.at_coord_idx + 1
+        coords = \
+            list(split_point_start.geometry.coords) +\
+            original_line_geometry.coords[idx_start:idx_end] +\
+            list(split_point_end.geometry.coords)
 
-    remaining_line_geometry = original_line_geometry
-
-    for i in range(len(split_points) - 1):
-        next_split_geometry = split_points[i + 1].geometry
-        snapped_geometry = ops.snap(remaining_line_geometry, next_split_geometry, tolerance=0.0000001)
-        split_line = ops.split(snapped_geometry, next_split_geometry)
-        split_segment_geometry = remove_consecutive_dupe_coords(LineString(split_line.geoms[0]))
-        if len(split_line.geoms) > 1:
-            # Only use remainder of line for snapping to minimize chance of snapping to the wrong location when segment is self-intersecting
-            remaining_line_geometry = split_line.geoms[1]
-        split_segments.append(SplitSegment(i, split_segment_geometry, split_points[i], split_points[i + 1]))
-
+        geom = get_split_line_geometry(coords)
+        split_segments.append(SplitSegment(i, geom, split_point_start, split_point_end))
+        i += 1
     return split_segments
 
 def get_lrs(x):
@@ -343,8 +343,8 @@ def get_split_segment_dict(original_segment_dict, split_segment, lr_columns_for_
 
     return modified_segment_dict
 
-def is_distinct_split_lr(lr1, lr2):
-    return abs(lr1 - lr2) > SPLIT_POINT_THRESHOLD
+def is_distinct_split_lr(lr1, lr2, segment_length):
+    return abs(lr1 - lr2) * segment_length > LR_SPLIT_POINT_MIN_DIST_METERS
 
 def add_lr_split_points(split_points, lrs, segment_id, original_segment_geometry):
     """
@@ -368,52 +368,87 @@ def add_lr_split_points(split_points, lrs, segment_id, original_segment_geometry
     # Get the length of the projected segment
     geod = pyproj.Geod(ellps="WGS84")
     line_length = geod.geometry_length(original_segment_geometry)
+    coords = list(original_segment_geometry.coords)
+
     for lr in lrs:
         add_split_point = False
         if len(split_points) == 0:
             add_split_point = True
         else:
             closest_existing_split_point = min(split_points, key=lambda existing: abs(lr - existing.lr))
-            if is_distinct_split_lr(closest_existing_split_point.lr, lr):
+            if is_distinct_split_lr(closest_existing_split_point.lr, lr, line_length):
                 add_split_point = True
 
         if add_split_point:
             target_length = lr * line_length
-
-            coords = list(original_segment_geometry.coords)
+            coord_idx = 0 # remember the index of the original geometry's coordinate
             for (lon1, lat1), (lon2, lat2) in zip(coords[:-1], coords[1:]):
                 (azimuth, _, subsegment_length) = geod.inv(lon1, lat1, lon2, lat2, return_back_azimuth=False)
                 if round(target_length - subsegment_length, 6) <= 0:
                     # Compute final point on this subsegment
                     break
                 target_length -= subsegment_length
+                coord_idx += 1
 
             # target_length is the length along this subsegment where the point is located. Use geod.fwd()
             # with the azimuth to get the final point
             split_lon, split_lat, _ = geod.fwd(lon1, lat1, azimuth, target_length, return_back_azimuth=False)
 
             point_geometry = round_point(Point(split_lon, split_lat))
-            split_points.append(SplitPoint(f"{segment_id}@{str(lr)}", point_geometry, lr, is_lr_added=True))
+            split_points.append(SplitPoint(f"{segment_id}@{str(lr)}", point_geometry, lr, lr_meters=lr * line_length, is_lr_added=True, at_coord_idx=coord_idx))
     return split_points
 
+def get_connector_split_points(connectors, original_segment_geometry):
+    split_points = []
+    if not connectors:
+        return split_points
 
-def make_split_point(connector, segment_geometry):
-    """
-    Determine the linear-referenced length along the segment for the given connector
-    """
-    # Start point special case because split will provide the full line
-    if not are_different_coords([connector.connector_geometry.x, connector.connector_geometry.y], list(segment_geometry.coords)[0]):
-        return SplitPoint(connector.connector_id, connector.connector_geometry, 0)
-
-    # Snap segment to connector geometry which adds it as a vertex, then split at the new line
-    split_line = ops.split(ops.snap(segment_geometry, connector.connector_geometry, tolerance=0.01), connector.connector_geometry)
-
-    # Compute length for split segment (first in collection) and compare to full segment
+    # Get the length of the projected segment
     geod = pyproj.Geod(ellps="WGS84")
-    target_geo_length = geod.geometry_length(split_line.geoms[0])
-    total_geo_length = geod.geometry_length(segment_geometry)
-    lr = target_geo_length / total_geo_length
-    return SplitPoint(connector.connector_id, connector.connector_geometry, lr)
+    original_segment_length = geod.geometry_length(original_segment_geometry)
+    original_segment_coords = list(original_segment_geometry.coords)
+    connectors_queue = deque(connectors)            
+    coord_idx = 0 
+    accumulated_segment_length = 0
+    for (lon1, lat1), (lon2, lat2) in zip(original_segment_coords[:-1], original_segment_coords[1:]):
+        sub_segment = LineString([(lon1, lat1), (lon2, lat2)])
+        sub_segment_length = geod.geometry_length(sub_segment)
+        
+        while connectors_queue:
+            next_connector = connectors_queue[0]
+            next_connector_geometry = next_connector.connector_geometry               
+
+            # Calculate the distances between points 1 and 2 of the sub-segment and the connector
+            _, _, dist12 = geod.inv(lon1, lat1, lon2, lat2)
+            _, _, dist1c = geod.inv(lon1, lat1, next_connector_geometry.x, next_connector_geometry.y)
+            _, _, dist2c = geod.inv(lon2, lat2, next_connector_geometry.x, next_connector_geometry.y)            
+                    
+
+            dist_diff = abs(dist1c + dist2c - dist12)
+            if dist_diff < IS_ON_SUB_SEGMENT_THRESHOLD_METERS:
+
+                if len(connectors_queue) == 1 and not are_different_coords(next_connector_geometry.coords[0], original_segment_coords[-1]):
+                    # edge case first - if this is the last connector, and it matches the last coordinate then LR should be 1,
+                    # no matter if the same coordinate may also appear here, somewhere else in the middle of the segment
+                    at_coord_idx = len(original_segment_coords) - 1
+                    lr_meters = original_segment_length
+                else:
+                    offset_on_segment_meters = dist1c
+                    at_coord_idx = coord_idx + 1 if offset_on_segment_meters == sub_segment_length else coord_idx
+                    lr_meters = accumulated_segment_length + offset_on_segment_meters
+
+                lr = lr_meters / original_segment_length
+                split_points.append(SplitPoint(next_connector.connector_id, next_connector_geometry, lr, lr_meters, is_lr_added=False, at_coord_idx=at_coord_idx))
+                connectors_queue.popleft()
+            else:
+                # next connector is not on this segment, move to next segment
+                break
+        coord_idx += 1
+        accumulated_segment_length += sub_segment_length
+
+    if connectors_queue:
+        raise Exception(f"Could not find split point locations for all connectors")
+    return split_points
 
 additional_fields_in_split_segments = [
     StructField("start_lr", DoubleType(), True),
@@ -500,7 +535,7 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
 
             debug_messages.append(str(input_segment.geometry))
 
-            split_points = [make_split_point(connector, input_segment.geometry) for connector in input_segment.joined_connectors if connector.connector_geometry is not None]
+            split_points = get_connector_split_points(input_segment.joined_connectors, input_segment.geometry) if SPLIT_AT_CONNECTORS else []
 
             debug_messages.append("adding lr split points...")
             lrs = []

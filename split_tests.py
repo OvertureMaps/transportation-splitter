@@ -12,7 +12,7 @@ class TestSplitter(unittest.TestCase):
 
     def test_remove_consecutive_dupe_coords(self):
         line = LineString([(0, 0), (1, 1), (1, 1), (2, 2)])
-        cleaned_line = remove_consecutive_dupe_coords(line)
+        cleaned_line = get_split_line_geometry(line.coords)
 
         assert(has_consecutive_dupe_coords(line))
         assert(not has_consecutive_dupe_coords(cleaned_line))
@@ -34,7 +34,7 @@ class TestSplitter(unittest.TestCase):
         input_segment_geometry = wkt.loads(input_segment_wkt)
         joined_connectors = [Connector("1", wkt.loads(point_wkt))  for point_wkt in split_points_wkts]
         
-        split_points = [make_split_point(connector, input_segment_geometry) for connector in joined_connectors]
+        split_points = get_connector_split_points(joined_connectors, input_segment_geometry)
         sorted_split_points = sorted(split_points, key=lambda p: p.lr)
         split_segments = split_line(input_segment_geometry, sorted_split_points)
 
@@ -56,6 +56,7 @@ class TestSplitter(unittest.TestCase):
         (0.6474039, "POINT (36.1357133 51.7210215)", "LINESTRING (36.1369686 51.7212314, 36.136962 51.7218083, 36.1366374 51.7214502, 36.1366057 51.7214161, 36.136594 51.7213954, 36.136579 51.7213789, 36.1365232 51.7213392, 36.1365077 51.7213249, 36.1365 51.72131, 36.1364969 51.7212912, 36.1365011 51.7212699, 36.1365117 51.7211947, 36.1364841 51.7211159, 36.1364818 51.7211093, 36.1364116 51.7210335, 36.1363076 51.7209744, 36.1361797 51.7209376, 36.1360698 51.7209266, 36.1359589 51.7209322, 36.1358534 51.7209541, 36.1357653 51.7209887, 36.1357133 51.7210215, 36.1356825 51.7210408, 36.1356271 51.7211005, 36.1355964 51.7211668, 36.1355922 51.7212356, 36.1356138 51.7213004, 36.1356147 51.7213031, 36.135643 51.7213398, 36.1356627 51.7213653, 36.1357334 51.7214186, 36.1358226 51.7214598, 36.1359543 51.7214911, 36.1360951 51.7214962, 36.1362319 51.7214747, 36.1363667 51.7214374, 36.1364183 51.7214191, 36.1364665 51.7214049, 36.1365165 51.7214048, 36.136563 51.7214132, 36.1366058 51.7214295, 36.1366374 51.7214502)"),
         (0.7476722, "POINT (36.1356138 51.7213004)", "LINESTRING (36.1369686 51.7212314, 36.136962 51.7218083, 36.1366374 51.7214502, 36.1366057 51.7214161, 36.136594 51.7213954, 36.136579 51.7213789, 36.1365232 51.7213392, 36.1365077 51.7213249, 36.1365 51.72131, 36.1364969 51.7212912, 36.1365011 51.7212699, 36.1365117 51.7211947, 36.1364841 51.7211159, 36.1364818 51.7211093, 36.1364116 51.7210335, 36.1363076 51.7209744, 36.1361797 51.7209376, 36.1360698 51.7209266, 36.1359589 51.7209322, 36.1358534 51.7209541, 36.1357653 51.7209887, 36.1357133 51.7210215, 36.1356825 51.7210408, 36.1356271 51.7211005, 36.1355964 51.7211668, 36.1355922 51.7212356, 36.1356138 51.7213004, 36.1356147 51.7213031, 36.135643 51.7213398, 36.1356627 51.7213653, 36.1357334 51.7214186, 36.1358226 51.7214598, 36.1359543 51.7214911, 36.1360951 51.7214962, 36.1362319 51.7214747, 36.1363667 51.7214374, 36.1364183 51.7214191, 36.1364665 51.7214049, 36.1365165 51.7214048, 36.136563 51.7214132, 36.1366058 51.7214295, 36.1366374 51.7214502)"),
         (0.7621897, "POINT (36.135643 51.7213398)", "LINESTRING (36.1369686 51.7212314, 36.136962 51.7218083, 36.1366374 51.7214502, 36.1366057 51.7214161, 36.136594 51.7213954, 36.136579 51.7213789, 36.1365232 51.7213392, 36.1365077 51.7213249, 36.1365 51.72131, 36.1364969 51.7212912, 36.1365011 51.7212699, 36.1365117 51.7211947, 36.1364841 51.7211159, 36.1364818 51.7211093, 36.1364116 51.7210335, 36.1363076 51.7209744, 36.1361797 51.7209376, 36.1360698 51.7209266, 36.1359589 51.7209322, 36.1358534 51.7209541, 36.1357653 51.7209887, 36.1357133 51.7210215, 36.1356825 51.7210408, 36.1356271 51.7211005, 36.1355964 51.7211668, 36.1355922 51.7212356, 36.1356138 51.7213004, 36.1356147 51.7213031, 36.135643 51.7213398, 36.1356627 51.7213653, 36.1357334 51.7214186, 36.1358226 51.7214598, 36.1359543 51.7214911, 36.1360951 51.7214962, 36.1362319 51.7214747, 36.1363667 51.7214374, 36.1364183 51.7214191, 36.1364665 51.7214049, 36.1365165 51.7214048, 36.136563 51.7214132, 36.1366058 51.7214295, 36.1366374 51.7214502)"),
+        # edge case if multiple matches for same point LR should be 1 if it matches last coord
         (1.0, "POINT (36.1366374 51.7214502)", "LINESTRING (36.1369686 51.7212314, 36.136962 51.7218083, 36.1366374 51.7214502, 36.1366057 51.7214161, 36.136594 51.7213954, 36.136579 51.7213789, 36.1365232 51.7213392, 36.1365077 51.7213249, 36.1365 51.72131, 36.1364969 51.7212912, 36.1365011 51.7212699, 36.1365117 51.7211947, 36.1364841 51.7211159, 36.1364818 51.7211093, 36.1364116 51.7210335, 36.1363076 51.7209744, 36.1361797 51.7209376, 36.1360698 51.7209266, 36.1359589 51.7209322, 36.1358534 51.7209541, 36.1357653 51.7209887, 36.1357133 51.7210215, 36.1356825 51.7210408, 36.1356271 51.7211005, 36.1355964 51.7211668, 36.1355922 51.7212356, 36.1356138 51.7213004, 36.1356147 51.7213031, 36.135643 51.7213398, 36.1356627 51.7213653, 36.1357334 51.7214186, 36.1358226 51.7214598, 36.1359543 51.7214911, 36.1360951 51.7214962, 36.1362319 51.7214747, 36.1363667 51.7214374, 36.1364183 51.7214191, 36.1364665 51.7214049, 36.1365165 51.7214048, 36.136563 51.7214132, 36.1366058 51.7214295, 36.1366374 51.7214502)")
     ]
     def test_make_split_point(self):
@@ -67,20 +68,26 @@ class TestSplitter(unittest.TestCase):
                 )
                 segment_geometry = wkt.loads(segment_geometry)
 
-                split_point = make_split_point(connector, segment_geometry)
+                split_points = get_connector_split_points([connector], segment_geometry)
+                self.assertEqual(len(split_points), 1, f"Expected 1 split point to be added")
+                split_point = split_points[0]
                 self.assertEqual(split_point.id, connector.connector_id)
                 self.assertEqual(split_point.geometry, connector.connector_geometry)
-                self.assertTrue(not is_distinct_split_lr(split_point.lr, expected_lr), f"Expected {expected_lr} but got {split_point.lr}")
+                diff = abs(split_point.lr - expected_lr)
+                max_diff = 0.0037 # using old relative threshold that worked for these test cases
+                self.assertLess(diff, max_diff, f"Expected LR {expected_lr} but got {split_point.lr}, diff={diff} > {max_diff} for point {connector_geometry} on {segment_geometry}")
 
     all_lr_split_points_params = [
         (["POINT (0 -1)", "POINT (0 0)", "POINT (0 1)"], [0, 0.5, 1], "LINESTRING (0 -1, 0 0, 0 1)"),
-
-        # Segment 0861f8e8b7ffffff0472f50156177cbd
         (
             ["POINT (9.0801344 47.6186536)", "POINT (9.0804543 47.6180565)", "POINT (9.0902962 47.6133758)"],
             [0, 0.065383196, 1],
             "LINESTRING (9.0801344 47.6186536, 9.0800997 47.6186326, 9.0800791 47.6185924, 9.0800843 47.6185427, 9.0801188 47.6184615, 9.0801668 47.6183788, 9.0804543 47.6180565, 9.0805653 47.6179441, 9.0810953 47.6173648, 9.0814542 47.616938, 9.0816872 47.6165648, 9.0822655 47.6154759, 9.0824197 47.6151925, 9.0828786 47.6143488, 9.0830582 47.6140789, 9.08328 47.6138545, 9.0835056 47.6136879, 9.0837723 47.6135666, 9.0840884 47.6134675, 9.0843454 47.613421, 9.0845588 47.6134024, 9.0848577 47.6134032, 9.0856258 47.6134536, 9.0887196 47.6137318, 9.0890434 47.6137309, 9.0893306 47.6137106, 9.0896078 47.6136567, 9.0898093 47.6135883, 9.0902317 47.6134075, 9.0902962 47.6133758)"
-        )
+        ),
+        # this is the new bug test case
+        (["POINT(-75.5559947 6.3343023)", "POINT(-75.555979  6.3343055)", "POINT (-75.5559789 6.3343055)", "POINT(-75.5559623 6.3343089)"],
+         [0, 0.4834686262557952, 0.4875426572351761, 1],
+         "LINESTRING (-75.5559947 6.3343023,  -75.5559789 6.3343055, -75.5559623 6.3343089)"),        
     ]
 
     def test_add_lr_split_points(self):
@@ -92,72 +99,135 @@ class TestSplitter(unittest.TestCase):
                     self.assertEqual(split_point.id, f"1@{lr}")
                     self.assertEqual(split_point.lr, lr)
                     self.assertTrue(equals(split_point.geometry, wkt.loads(expected_point)), f"Expected {expected_point} but got {split_point.geometry}")
-
+                    
     def test_split_line_simple(self):
-        segment_geometry = wkt.loads("LINESTRING (0 -1, 0 0, 0 1)")
-        split_points = [
-            make_split_point(Connector("1", wkt.loads("POINT (0 -1)")), segment_geometry),
-            make_split_point(Connector("2", wkt.loads("POINT (0 0)")), segment_geometry),
-            make_split_point(Connector("3", wkt.loads("POINT (0 1)")), segment_geometry),
+        segment_wkt = "LINESTRING (0 -1, 0 0, 0 1)"
+        split_point_wkts = [
+            "POINT (0 -1)",
+            "POINT (0 0)",
+            "POINT (0 1)",            
         ]
-        split_segments = split_line(segment_geometry, split_points)
-
-        self.assertEqual(len(split_segments), 2)
-        self.assertTrue(equals(split_segments[0].geometry, wkt.loads("LINESTRING (0 -1, 0 0)")), f"Unexpected line split value {wkt.dumps(split_segments[0].geometry)} for first segment split")
-        self.assertTrue(equals(split_segments[1].geometry, wkt.loads("LINESTRING (0 0, 0 1)")), f"Unexpected line split value {wkt.dumps(split_segments[1].geometry)} for second segment split")
+        split_segments = self.split_line(segment_wkt, split_point_wkts)
+        self.assert_expected_splits(split_segments, [
+            "LINESTRING (0 -1, 0 0)",
+            "LINESTRING (0 0, 0 1)"
+        ])
 
     def test_split_line_no_mid_split_points(self):
-        segment_geometry = wkt.loads("LINESTRING (0 -1, 0 0, 0 1)")
-        split_points = [
-            make_split_point(Connector("1", wkt.loads("POINT (0 -1)")), segment_geometry),
-            make_split_point(Connector("2", wkt.loads("POINT (0 1)")), segment_geometry),
+        segment_wkt ="LINESTRING (0 -1, 0 0, 0 1)"
+        split_point_wkts = [
+            "POINT (0 -1)",
+            "POINT (0 1)",            
         ]
-        split_segments = split_line(segment_geometry, split_points)
-
-        self.assertEqual(len(split_segments), 1, "Only one segment expected")
-        self.assertTrue(equals(split_segments[0].geometry, wkt.loads("LINESTRING (0 -1, 0 0, 0 1)")), f"Unexpected line split value {wkt.dumps(split_segments[0].geometry)} for segment")
+        split_segments = self.split_line(segment_wkt, split_point_wkts)
+        self.assert_expected_splits(split_segments, ["LINESTRING (0 -1, 0 0, 0 1)"])
 
     def test_split_line_middle(self):
-        segment_geometry = wkt.loads("LINESTRING (18.3863377 47.760202, 18.3828519 47.7581581, 18.3824642 47.7580508, 18.3748238 47.7543556, 18.3778371 47.7498419, 18.3773911 47.7496924))")
-        split_points = add_lr_split_points([], [0, 0.207325479, 0.22614114, 1], "1", segment_geometry)
-        split_segments = split_line(segment_geometry, split_points)
-
-        self.assertEqual(len(split_segments), 3)
-        self.assertTrue(equals(split_segments[0].geometry,
-            wkt.loads("LINESTRING (18.3863377 47.760202, 18.3828519 47.7581581)")),
-            f"Unexpected line split value {wkt.dumps(split_segments[0].geometry)} for first segment split"
-        )
-        self.assertTrue(equals(split_segments[1].geometry,
-            wkt.loads("LINESTRING (18.3828519 47.7581581, 18.3824642 47.7580508, 18.3824641 47.7580508)")),
-            f"Unexpected line split value {split_segments[1].geometry} for second segment split"
-        )
-        self.assertTrue(equals(split_segments[2].geometry,
-            wkt.loads("LINESTRING (18.3824641 47.7580508, 18.3748238 47.7543556, 18.3778371 47.7498419, 18.3773911 47.7496924))")),
-            f"Unexpected line split value {wkt.dumps(split_segments[2].geometry)} for third segment split"
-        )
-
-
+        segment_wkt ="LINESTRING (18.3863377 47.760202, 18.3828519 47.7581581, 18.3824642 47.7580508, 18.3748238 47.7543556, 18.3778371 47.7498419, 18.3773911 47.7496924)"
+        lrs = [0, 0.207325479, 0.22614114, 1]
+        split_segments = self.split_line(segment_wkt, [], lrs)
+        self.assert_expected_splits(split_segments, [
+            "LINESTRING (18.3863377 47.760202, 18.3828519 47.7581581)",
+            "LINESTRING (18.3828519 47.7581581, 18.3824642 47.7580508, 18.3824641 47.7580508)",
+            "LINESTRING (18.3824641 47.7580508, 18.3748238 47.7543556, 18.3778371 47.7498419, 18.3773911 47.7496924)"
+            ])        
 
     def test_split_line(self):
         # Segment 08811942715fffff045effc98960a032
-        segment_geometry = wkt.loads(
-            "LINESTRING (36.1369686 51.7212314, 36.136962 51.7218083, 36.1366374 51.7214502, 36.1366057 51.7214161, 36.136594 51.7213954, 36.136579 51.7213789, 36.1365232 51.7213392, 36.1365077 51.7213249, 36.1365 51.72131, 36.1364969 51.7212912, 36.1365011 51.7212699, 36.1365117 51.7211947, 36.1364841 51.7211159, 36.1364818 51.7211093, 36.1364116 51.7210335, 36.1363076 51.7209744, 36.1361797 51.7209376, 36.1360698 51.7209266, 36.1359589 51.7209322, 36.1358534 51.7209541, 36.1357653 51.7209887, 36.1357133 51.7210215, 36.1356825 51.7210408, 36.1356271 51.7211005, 36.1355964 51.7211668, 36.1355922 51.7212356, 36.1356138 51.7213004, 36.1356147 51.7213031, 36.135643 51.7213398, 36.1356627 51.7213653, 36.1357334 51.7214186, 36.1358226 51.7214598, 36.1359543 51.7214911, 36.1360951 51.7214962, 36.1362319 51.7214747, 36.1363667 51.7214374, 36.1364183 51.7214191, 36.1364665 51.7214049, 36.1365165 51.7214048, 36.136563 51.7214132, 36.1366058 51.7214295, 36.1366374 51.7214502)"
-        )
-        split_points = [
-            make_split_point(Connector("1", wkt.loads("POINT (36.1369686 51.7212314)")), segment_geometry),
-            make_split_point(Connector("2", wkt.loads("POINT (36.135643 51.7213398)")), segment_geometry),
-            make_split_point(Connector("3", wkt.loads("POINT (36.1366374 51.7214502)")), segment_geometry),
+        segment_wkt = "LINESTRING (36.1369686 51.7212314, 36.136962 51.7218083, 36.1366374 51.7214502, 36.1366057 51.7214161, 36.136594 51.7213954, 36.136579 51.7213789, 36.1365232 51.7213392, 36.1365077 51.7213249, 36.1365 51.72131, 36.1364969 51.7212912, 36.1365011 51.7212699, 36.1365117 51.7211947, 36.1364841 51.7211159, 36.1364818 51.7211093, 36.1364116 51.7210335, 36.1363076 51.7209744, 36.1361797 51.7209376, 36.1360698 51.7209266, 36.1359589 51.7209322, 36.1358534 51.7209541, 36.1357653 51.7209887, 36.1357133 51.7210215, 36.1356825 51.7210408, 36.1356271 51.7211005, 36.1355964 51.7211668, 36.1355922 51.7212356, 36.1356138 51.7213004, 36.1356147 51.7213031, 36.135643 51.7213398, 36.1356627 51.7213653, 36.1357334 51.7214186, 36.1358226 51.7214598, 36.1359543 51.7214911, 36.1360951 51.7214962, 36.1362319 51.7214747, 36.1363667 51.7214374, 36.1364183 51.7214191, 36.1364665 51.7214049, 36.1365165 51.7214048, 36.136563 51.7214132, 36.1366058 51.7214295, 36.1366374 51.7214502)"
+        
+        split_point_wkts = [
+            "POINT (36.1369686 51.7212314)",
+            "POINT (36.135643 51.7213398)",            
+            "POINT (36.1366374 51.7214502)",
         ]
-        split_segments = split_line(segment_geometry, split_points)
 
-        self.assertEqual(len(split_segments), 2)
-        self.assertTrue(equals(split_segments[0].geometry,
-            wkt.loads("LINESTRING (36.1369686 51.7212314, 36.136962 51.7218083, 36.1366374 51.7214502, 36.1366057 51.7214161, 36.136594 51.7213954, 36.136579 51.7213789, 36.1365232 51.7213392, 36.1365077 51.7213249, 36.1365 51.72131, 36.1364969 51.7212912, 36.1365011 51.7212699, 36.1365117 51.7211947, 36.1364841 51.7211159, 36.1364818 51.7211093, 36.1364116 51.7210335, 36.1363076 51.7209744, 36.1361797 51.7209376, 36.1360698 51.7209266, 36.1359589 51.7209322, 36.1358534 51.7209541, 36.1357653 51.7209887, 36.1357133 51.7210215, 36.1356825 51.7210408, 36.1356271 51.7211005, 36.1355964 51.7211668, 36.1355922 51.7212356, 36.1356138 51.7213004, 36.1356147 51.7213031, 36.135643 51.7213398)")),
-            f"Unexpected line split value {wkt.dumps(split_segments[0].geometry)} for first segment split"
-        )
-        self.assertTrue(equals(split_segments[1].geometry,
-            wkt.loads("LINESTRING (36.135643 51.7213398, 36.1356627 51.7213653, 36.1357334 51.7214186, 36.1358226 51.7214598, 36.1359543 51.7214911, 36.1360951 51.7214962, 36.1362319 51.7214747, 36.1363667 51.7214374, 36.1364183 51.7214191, 36.1364665 51.7214049, 36.1365165 51.7214048, 36.136563 51.7214132, 36.1366058 51.7214295, 36.1366374 51.7214502)")),
-            f"Unexpected line split value {wkt.dumps(split_segments[1].geometry)} for second segment split"
-        )
+        split_segments = self.split_line(segment_wkt, split_point_wkts)
+        self.assert_expected_splits(split_segments, [
+            "LINESTRING (36.1369686 51.7212314, 36.136962 51.7218083, 36.1366374 51.7214502, 36.1366057 51.7214161, 36.136594 51.7213954, 36.136579 51.7213789, 36.1365232 51.7213392, 36.1365077 51.7213249, 36.1365 51.72131, 36.1364969 51.7212912, 36.1365011 51.7212699, 36.1365117 51.7211947, 36.1364841 51.7211159, 36.1364818 51.7211093, 36.1364116 51.7210335, 36.1363076 51.7209744, 36.1361797 51.7209376, 36.1360698 51.7209266, 36.1359589 51.7209322, 36.1358534 51.7209541, 36.1357653 51.7209887, 36.1357133 51.7210215, 36.1356825 51.7210408, 36.1356271 51.7211005, 36.1355964 51.7211668, 36.1355922 51.7212356, 36.1356138 51.7213004, 36.1356147 51.7213031, 36.135643 51.7213398)",
+            "LINESTRING (36.135643 51.7213398, 36.1356627 51.7213653, 36.1357334 51.7214186, 36.1358226 51.7214598, 36.1359543 51.7214911, 36.1360951 51.7214962, 36.1362319 51.7214747, 36.1363667 51.7214374, 36.1364183 51.7214191, 36.1364665 51.7214049, 36.1365165 51.7214048, 36.136563 51.7214132, 36.1366058 51.7214295, 36.1366374 51.7214502)",            
+        ])
+
+    def test_split_line_close_connectors(self):
+        segment_wkt ="LINESTRING (-75.5559947 6.3343023, -75.5559789 6.3343055, -75.5559623 6.3343089)"
+        split_point_wkts = [
+            "POINT (-75.5559947 6.3343023)",
+            "POINT (-75.555979  6.3343055)",
+            "POINT (-75.5559789 6.3343055)",
+            "POINT (-75.5559623 6.3343089)",
+        ]
+        split_segments = self.split_line(segment_wkt, split_point_wkts)
+
+        expected_splits = [
+            "LINESTRING (-75.5559947 6.3343023, -75.555979  6.3343055)",
+            "LINESTRING (-75.555979  6.3343055, -75.5559789 6.3343055)",
+            "LINESTRING (-75.5559789 6.3343055, -75.5559623 6.3343089)",           
+        ]
+        self.assert_expected_splits(split_segments, expected_splits)
+
+
+    def test_split_line_close_lrs(self):
+        segment_wkt ="LINESTRING (-75.5559947 6.3343023, -75.5559789 6.3343055, -75.5559623 6.3343089)"
+        split_point_wkts = [
+            "POINT (-75.5559947 6.3343023)",
+            "POINT (-75.5559623 6.3343089)",
+        ]
+        lrs = [
+            0.4834686262557952, #POINT (-75.555979 6.3343055)
+            0.4875426572351761, #POINT (-75.5559789 6.3343055)
+        ]
+        split_segments = self.split_line(segment_wkt, split_point_wkts, lrs)        
+
+        expected_splits = [
+            "LINESTRING (-75.5559947 6.3343023, -75.555979  6.3343055)",
+            "LINESTRING (-75.555979  6.3343055, -75.5559789 6.3343055)",
+            "LINESTRING (-75.5559789 6.3343055, -75.5559623 6.3343089)",           
+        ]
+
+        self.assert_expected_splits(split_segments, expected_splits)
+
+    def test_self_intersecting(self): 
+        segment_wkt ="LINESTRING (36.1369686 51.7212314, 36.136962 51.7218083, 36.1366374 51.7214502, 36.1366057 51.7214161, 36.136594 51.7213954, 36.136579 51.7213789, 36.1365232 51.7213392, 36.1365077 51.7213249, 36.1365 51.72131, 36.1364969 51.7212912, 36.1365011 51.7212699, 36.1365117 51.7211947, 36.1364841 51.7211159, 36.1364818 51.7211093, 36.1364116 51.7210335, 36.1363076 51.7209744, 36.1361797 51.7209376, 36.1360698 51.7209266, 36.1359589 51.7209322, 36.1358534 51.7209541, 36.1357653 51.7209887, 36.1357133 51.7210215, 36.1356825 51.7210408, 36.1356271 51.7211005, 36.1355964 51.7211668, 36.1355922 51.7212356, 36.1356138 51.7213004, 36.1356147 51.7213031, 36.135643 51.7213398, 36.1356627 51.7213653, 36.1357334 51.7214186, 36.1358226 51.7214598, 36.1359543 51.7214911, 36.1360951 51.7214962, 36.1362319 51.7214747, 36.1363667 51.7214374, 36.1364183 51.7214191, 36.1364665 51.7214049, 36.1365165 51.7214048, 36.136563 51.7214132, 36.1366058 51.7214295, 36.1366374 51.7214502)"
+        split_point_wkts = [
+            "POINT (36.1369686 51.7212314)",
+            "POINT (36.1366374 51.7214502)",
+        ]
+        split_segments = self.split_line(segment_wkt, split_point_wkts)
+
+        expected_splits = [
+            segment_wkt
+        ]
+
+        self.assert_expected_splits(split_segments, expected_splits)        
+
+    def test_self_intersecting2(self): 
+        segment_wkt ="LINESTRING (36.1369686 51.7212314, 36.136962 51.7218083, 36.1366374 51.7214502, 36.1366057 51.7214161, 36.136594 51.7213954, 36.136579 51.7213789, 36.1365232 51.7213392, 36.1365077 51.7213249, 36.1365 51.72131, 36.1364969 51.7212912, 36.1365011 51.7212699, 36.1365117 51.7211947, 36.1364841 51.7211159, 36.1364818 51.7211093, 36.1364116 51.7210335, 36.1363076 51.7209744, 36.1361797 51.7209376, 36.1360698 51.7209266, 36.1359589 51.7209322, 36.1358534 51.7209541, 36.1357653 51.7209887, 36.1357133 51.7210215, 36.1356825 51.7210408, 36.1356271 51.7211005, 36.1355964 51.7211668, 36.1355922 51.7212356, 36.1356138 51.7213004, 36.1356147 51.7213031, 36.135643 51.7213398, 36.1356627 51.7213653, 36.1357334 51.7214186, 36.1358226 51.7214598, 36.1359543 51.7214911, 36.1360951 51.7214962, 36.1362319 51.7214747, 36.1363667 51.7214374, 36.1364183 51.7214191, 36.1364665 51.7214049, 36.1365165 51.7214048, 36.136563 51.7214132, 36.1366058 51.7214295, 36.1366374 51.7214502)"
+        split_point_wkts = [
+            "POINT (36.1369686 51.7212314)",
+            "POINT (36.1366374 51.7214502)",
+            "POINT (36.1366374 51.7214502)",
+        ]
+        split_segments = self.split_line(segment_wkt, split_point_wkts)
+
+        expected_splits = [
+            "LINESTRING (36.1369686 51.7212314, 36.136962 51.7218083, 36.1366374 51.7214502)",
+            "LINESTRING (36.1366374 51.7214502, 36.1366057 51.7214161, 36.136594 51.7213954, 36.136579 51.7213789, 36.1365232 51.7213392, 36.1365077 51.7213249, 36.1365 51.72131, 36.1364969 51.7212912, 36.1365011 51.7212699, 36.1365117 51.7211947, 36.1364841 51.7211159, 36.1364818 51.7211093, 36.1364116 51.7210335, 36.1363076 51.7209744, 36.1361797 51.7209376, 36.1360698 51.7209266, 36.1359589 51.7209322, 36.1358534 51.7209541, 36.1357653 51.7209887, 36.1357133 51.7210215, 36.1356825 51.7210408, 36.1356271 51.7211005, 36.1355964 51.7211668, 36.1355922 51.7212356, 36.1356138 51.7213004, 36.1356147 51.7213031, 36.135643 51.7213398, 36.1356627 51.7213653, 36.1357334 51.7214186, 36.1358226 51.7214598, 36.1359543 51.7214911, 36.1360951 51.7214962, 36.1362319 51.7214747, 36.1363667 51.7214374, 36.1364183 51.7214191, 36.1364665 51.7214049, 36.1365165 51.7214048, 36.136563 51.7214132, 36.1366058 51.7214295, 36.1366374 51.7214502)"
+        ]
+
+        self.assert_expected_splits(split_segments, expected_splits)        
+
+    def split_line(self, segment_wkt:str, split_point_wkts: list[str], lrs: list[float]=[]) -> list[SplitSegment]:
+        segment_geometry = wkt.loads(segment_wkt)
+        joined_connectors = [Connector(str(i), wkt.loads(point_wkt)) for i, point_wkt in enumerate(split_point_wkts)]
+        split_points: list[SplitPoint] = get_connector_split_points(joined_connectors, segment_geometry)        
+        add_lr_split_points(split_points, lrs, "", segment_geometry)
+        sorted_split_points = sorted(split_points, key=lambda p: p.lr)
+        return split_line(segment_geometry, sorted_split_points)
+    
+    def assert_expected_splits(self, split_segments, expected_splits):
+        self.assertEqual(len(split_segments), len(expected_splits))
+        for index, (expected, actual) in enumerate(zip(expected_splits, split_segments)):
+            assert(not has_consecutive_dupe_coords(actual.geometry))
+            self.assertEqual(wkt.loads(expected), actual.geometry, f"Incorrect split number #{index}:\nexpected:\n{expected}\nbut got\n{str(actual.geometry)}")
 
 unittest.main(argv=[''], verbosity=2, exit=False)
