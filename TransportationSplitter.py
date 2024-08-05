@@ -23,6 +23,7 @@ import unittest
 
 SPLIT_AT_CONNECTORS = True
 PROHIBITED_TRANSITIONS_COLUMN = "prohibited_transitions"
+DESTINATIONS_COLUMN = "destinations"
 
 # List of columns that are considered for identifying the LRs values to split at is constructed at runtime out of input parquet's schema columns that have LR_SCOPE_KEY = "between" anywhere in their structure. The include/exclude constants below are applied to that list.
 # Explicit list of column names to use for finding LR "between" values to split at. Set to None or empty list to use all columns that have "between" fields.
@@ -143,13 +144,21 @@ def filter_df(input_df, filter_wkt, condition_function = "ST_Intersects"):
 
 def join_segments_with_connectors(input_df):
     segments_df = input_df.filter(col("type") == "segment").withColumnRenamed("id", "segment_id")
-    connectors_df = connector_df = input_df.filter(col("type") == "connector")\
+    connectors_df = input_df.filter(col("type") == "connector")\
         .withColumnRenamed("id", "connector_id")\
         .withColumnRenamed("geometry", "connector_geometry")\
 
+    segments_with_index = segments_df.withColumn(
+        "connector_ids_with_index",
+        F.expr("TRANSFORM(connector_ids, (x, i) -> STRUCT(x AS id, i AS index))")
+    )
     segments_connectors_exploded = segments_df.select(
         col("segment_id"),
-        explode("connector_ids").alias("connector_id")
+        explode("connector_ids_with_index").alias("connector_with_index")
+    ).select(
+        col("segment_id"),
+        col("connector_with_index.id").alias("connector_id"),
+        col("connector_with_index.index").alias("connector_index")
     )
 
     # Step 2: Join with connectors_df to get connector geometry
@@ -160,6 +169,7 @@ def join_segments_with_connectors(input_df):
     ).select(
         segments_connectors_exploded.segment_id,
         segments_connectors_exploded.connector_id,
+        segments_connectors_exploded.connector_index,
         connectors_df.connector_geometry
     )
 
@@ -168,7 +178,8 @@ def join_segments_with_connectors(input_df):
         collect_list(
             struct(
                 col("connector_id"),
-                col("connector_geometry")
+                col("connector_geometry"),
+                col("connector_index")
             )
         ).alias("joined_connectors")
     )
@@ -342,7 +353,7 @@ def get_split_segment_dict(original_segment_dict, split_segment, lr_columns_for_
             continue
         modified_segment_dict[column] = apply_lr_scope(modified_segment_dict[column], split_segment)
 
-    if PROHIBITED_TRANSITIONS_COLUMN in lr_columns_for_splitting:
+    if SPLIT_AT_CONNECTORS and PROHIBITED_TRANSITIONS_COLUMN in lr_columns_for_splitting:
         # remove turn restrictions that we're sure don't apply to this split and construct turn_restrictions field -
         # this is a flat list of all segment_id referenced in sequences;
         # used to resolve segment references after split - for each TR segment_id reference we need to identify which of the splits to retain as reference
@@ -415,7 +426,8 @@ def get_connector_split_points(connectors, original_segment_geometry):
     geod = pyproj.Geod(ellps="WGS84")
     original_segment_length = geod.geometry_length(original_segment_geometry)
     original_segment_coords = list(original_segment_geometry.coords)
-    connectors_queue = deque([c for c in connectors if c.connector_geometry])
+    sorted_valid_connectors = sorted([c for c in connectors if c.connector_geometry], key=lambda p: p.connector_index)
+    connectors_queue = deque(sorted_valid_connectors)
     coord_idx = 0 
     accumulated_segment_length = 0
     for (lon1, lat1), (lon2, lat2) in zip(original_segment_coords[:-1], original_segment_coords[1:]):
@@ -758,7 +770,7 @@ def split_transportation(spark, input_path, output_path, filter_wkt=None, reuse_
     final_segments_df.groupBy("id").agg(count("*").alias("number_of_splits")).groupBy("number_of_splits").agg(count("*")).orderBy("number_of_splits").show()
 
     all_connectors_df = filtered_df.filter("type == 'connector'").unionByName(added_connectors_df).select(filtered_df.columns)
-    if PROHIBITED_TRANSITIONS_COLUMN in lr_columns_for_splitting:
+    if SPLIT_AT_CONNECTORS and PROHIBITED_TRANSITIONS_COLUMN in lr_columns_for_splitting:
         final_segments_df = resolve_tr_references(final_segments_df)
 
         # if we're resolving TR refs we need to set the schema with start_lr, end_lr fields for connectors too, so that the union can work:
@@ -780,6 +792,7 @@ def split_transportation(spark, input_path, output_path, filter_wkt=None, reuse_
 class Connector(NamedTuple):
     connector_id: str
     connector_geometry: Point
+    connector_index: int
 
 class TestSplitter(unittest.TestCase):
 
@@ -812,7 +825,7 @@ class TestSplitter(unittest.TestCase):
         ]
 
         input_segment_geometry = wkt.loads(input_segment_wkt)
-        joined_connectors = [Connector("1", wkt.loads(point_wkt))  for point_wkt in split_points_wkts]
+        joined_connectors = [Connector(str(index), wkt.loads(point_wkt), index) for index, point_wkt in enumerate(split_points_wkts)]
         
         split_points = get_connector_split_points(joined_connectors, input_segment_geometry)
         sorted_split_points = sorted(split_points, key=lambda p: p.lr)
@@ -843,8 +856,9 @@ class TestSplitter(unittest.TestCase):
         for expected_lr, connector_geometry, segment_geometry in self.make_split_point_params:
             with self.subTest(expected_lr=expected_lr, connector_geometry=connector_geometry, segment_geometry=segment_geometry):
                 connector = Connector(
-                    "1",
-                    wkt.loads(connector_geometry)
+                    "0",
+                    wkt.loads(connector_geometry),
+                    0
                 )
                 segment_geometry = wkt.loads(segment_geometry)
 
@@ -996,9 +1010,23 @@ class TestSplitter(unittest.TestCase):
 
         self.assert_expected_splits(split_segments, expected_splits)        
 
+    def test_self_simple_case(self): 
+        segment_wkt ="LINESTRING (-122.1861714 47.6170546, -122.1862553 47.617057, -122.1863795 47.6169457, -122.1865169 47.6168246, -122.1865565 47.616773, -122.1865631 47.6167195, -122.1864931 47.6166421, -122.1864337 47.6166269, -122.186071 47.6166306)"
+        split_point_wkts = [
+            "POINT (-122.1861714 47.6170546)",
+            "POINT (-122.186071 47.6166306)",
+        ]
+        split_segments = self.split_line(segment_wkt, split_point_wkts)
+
+        expected_splits = [
+            "LINESTRING (-122.1861714 47.6170546, -122.1862553 47.617057, -122.1863795 47.6169457, -122.1865169 47.6168246, -122.1865565 47.616773, -122.1865631 47.6167195, -122.1864931 47.6166421, -122.1864337 47.6166269, -122.186071 47.6166306)",
+        ]
+
+        self.assert_expected_splits(split_segments, expected_splits)
+
     def split_line(self, segment_wkt:str, split_point_wkts: list[str], lrs: list[float]=[]) -> list[SplitSegment]:
         segment_geometry = wkt.loads(segment_wkt)
-        joined_connectors = [Connector(str(i), wkt.loads(point_wkt)) for i, point_wkt in enumerate(split_point_wkts)]
+        joined_connectors = [Connector(str(i), wkt.loads(point_wkt), i) for i, point_wkt in enumerate(split_point_wkts)]
         split_points: list[SplitPoint] = get_connector_split_points(joined_connectors, segment_geometry)        
         add_lr_split_points(split_points, lrs, "", segment_geometry)
         sorted_split_points = sorted(split_points, key=lambda p: p.lr)
