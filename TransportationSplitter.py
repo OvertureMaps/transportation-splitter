@@ -415,7 +415,7 @@ def get_connector_split_points(connectors, original_segment_geometry):
     geod = pyproj.Geod(ellps="WGS84")
     original_segment_length = geod.geometry_length(original_segment_geometry)
     original_segment_coords = list(original_segment_geometry.coords)
-    connectors_queue = deque(connectors)            
+    connectors_queue = deque([c for c in connectors if c.connector_geometry])
     coord_idx = 0 
     accumulated_segment_length = 0
     for (lon1, lat1), (lon2, lat2) in zip(original_segment_coords[:-1], original_segment_coords[1:]):
