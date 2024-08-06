@@ -33,7 +33,7 @@ LR_COLUMNS_TO_EXCLUDE = []
 
 LR_SCOPE_KEY = "between"
 POINT_PRECISION = 7
-LR_SPLIT_POINT_MIN_DIST_METERS = 0.001 # New split points are needed for linear references. How far in meters from other existing splits (from either connectors or other LRs) do these LRs need to be for us to create a new connector for them instead of using the existing connector.
+LR_SPLIT_POINT_MIN_DIST_METERS = 0.01 # New split points are needed for linear references. How far in meters from other existing splits (from either connectors or other LRs) do these LRs need to be for us to create a new connector for them instead of using the existing connector.
 IS_ON_SUB_SEGMENT_THRESHOLD_METERS = 0.001 # 1mm -> max distance from a connector point to a sub-segment for the connector to be considered "on" that sub-segment
 
 class SplitPoint:
