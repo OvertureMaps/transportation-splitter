@@ -152,7 +152,7 @@ def join_segments_with_connectors(input_df):
         "connector_ids_with_index",
         F.expr("TRANSFORM(connector_ids, (x, i) -> STRUCT(x AS id, i AS index))")
     )
-    segments_connectors_exploded = segments_df.select(
+    segments_connectors_exploded = segments_with_index.select(
         col("segment_id"),
         explode("connector_ids_with_index").alias("connector_with_index")
     ).select(
