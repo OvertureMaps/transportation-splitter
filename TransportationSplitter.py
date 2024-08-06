@@ -414,7 +414,15 @@ def add_lr_split_points(split_points, lrs, segment_id, original_segment_geometry
             split_lon, split_lat, _ = geod.fwd(lon1, lat1, azimuth, target_length, return_back_azimuth=False)
 
             point_geometry = round_point(Point(split_lon, split_lat))
-            split_points.append(SplitPoint(f"{segment_id}@{str(lr)}", point_geometry, lr, lr_meters=lr * line_length, is_lr_added=True, at_coord_idx=coord_idx))
+            # see if after rounding we have a point identical to last one;
+            # if yes, then don't add a new split point; if we did, we would end up with invalid lines 
+            # that start and end in the same point, or, more accurately,  because we have a step that 
+            # removes consecutive identical coordinates from splits, it would result in a line with a 
+            # single point, which would be invalid.
+            # this effectively is an additional tollerance on top of LR_SPLIT_POINT_MIN_DIST_METERS,
+            # which is controlled by the rouding parameter POINT_PRECISION, default value=7, which is ~centimeter size
+            if not split_points or are_different_coords(split_points[-1].geometry.coords[0], point_geometry.coords[0]):
+                split_points.append(SplitPoint(f"{segment_id}@{str(lr)}", point_geometry, lr, lr_meters=lr * line_length, is_lr_added=True, at_coord_idx=coord_idx))
     return split_points
 
 def get_connector_split_points(connectors, original_segment_geometry):
@@ -1023,6 +1031,37 @@ class TestSplitter(unittest.TestCase):
         ]
 
         self.assert_expected_splits(split_segments, expected_splits)
+
+    def test_self_close_lrs(self): 
+        segment_wkt ="LINESTRING (-52.2980902 -27.3932688, -52.2981714 -27.3933322, -52.2983511 -27.3934847, -52.298498 -27.393567)"
+        split_point_wkts = [
+            "POINT (-52.2980902 -27.3932688)",
+            "POINT (-52.298498 -27.393567)",
+        ]
+        # even though 0.672404689 is "different" LR than previous one 0.672192 
+        # according to LR_SPLIT_POINT_MIN_DIST_METERS (they are >1cm apart), 
+        # it results after rounding the two corresponding split points in the
+        # same coordinates, which would produce invalid 1 coordinate lines, 
+        # so we expect the code to "snap" these two LRs into one and handle this 
+        # case gracefuly
+        lrs = [
+            0,
+            0.203822671,
+            0.672192,
+            0.672404689, 
+            1
+        ]
+        split_segments = self.split_line(segment_wkt, split_point_wkts, lrs)
+
+        expected_splits = [
+            "LINESTRING (-52.2980902 -27.3932688, -52.2981714 -27.3933322)",
+            "LINESTRING (-52.2981714 -27.3933322, -52.2983511 -27.3934847)",
+            "LINESTRING (-52.2983511 -27.3934847, -52.298498 -27.393567)",
+        ]
+
+        self.assert_expected_splits(split_segments, expected_splits)
+
+
 
     def split_line(self, segment_wkt:str, split_point_wkts: list[str], lrs: list[float]=[]) -> list[SplitSegment]:
         segment_geometry = wkt.loads(segment_wkt)
