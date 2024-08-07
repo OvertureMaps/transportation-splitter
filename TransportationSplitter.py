@@ -252,7 +252,8 @@ def get_lrs(x):
     return output
 
 def is_lr_scope_covering_split(between, split_segment):
-    return (between[0] if between[0] else 0) <= split_segment.start_split_point.lr and (between[1] if between[1] else 1) >= split_segment.end_split_point.lr
+    return (between[0] if between[0] else 0) >= split_segment.start_split_point.lr - LR_SPLIT_POINT_MIN_DIST_METERS and \
+           (between[1] if between[1] else 1) <= split_segment.end_split_point.lr + LR_SPLIT_POINT_MIN_DIST_METERS
 
 def apply_lr_scope(x, split_segment, xpath = "$"):
     if x is None:
@@ -1057,6 +1058,32 @@ class TestSplitter(unittest.TestCase):
             "LINESTRING (-52.2980902 -27.3932688, -52.2981714 -27.3933322)",
             "LINESTRING (-52.2981714 -27.3933322, -52.2983511 -27.3934847)",
             "LINESTRING (-52.2983511 -27.3934847, -52.298498 -27.393567)",
+        ]
+
+        self.assert_expected_splits(split_segments, expected_splits)
+
+
+    def test_self_close_lrs2(self): 
+        segment_wkt ="LINESTRING (-42.4236725 -22.1629146, -42.4235532 -22.1628487, -42.4234941 -22.1628052, -42.4230324 -22.1624829, -42.4229095 -22.162408, -42.4228656 -22.1623602)"
+        split_point_wkts = [
+            "POINT (-42.4236725 -22.1629146)",
+            "POINT (-42.4228656 -22.1623602)",
+        ]
+        lrs = [
+            0,
+            0.212825,
+            0.212921497,
+            0.786432, 
+            0.786787361,
+            1
+        ]
+        split_segments = self.split_line(segment_wkt, split_point_wkts, lrs)
+
+        expected_splits = [
+            "LINESTRING (-42.4236725 -22.1629146, -42.4235532 -22.1628487, -42.4234941 -22.1628052)",
+            "LINESTRING (-42.4234941 -22.1628052, -42.4230327 -22.1624831)",
+            "LINESTRING (-42.4230327 -22.1624831, -42.4230324 -22.1624829)",
+            "LINESTRING (-42.4230324 -22.1624829, -42.4229095 -22.162408, -42.4228656 -22.1623602)",
         ]
 
         self.assert_expected_splits(split_segments, expected_splits)
