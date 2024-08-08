@@ -7,7 +7,7 @@ class TestApplyLR(unittest.TestCase):
             "lr bigger than split", # case "label" to identify it more easily when fails
             1000,                   # original segment length (meters)
             [0, 0.8],               # original lr (relative)
-            [0, 0.5],               # split start lr (relative)
+            [0, 0.5],               # split lr (relative)
             True,                   # expected is_applicable
             None,                   # expected new lr (relative)
         ),
@@ -47,4 +47,5 @@ class TestApplyLR(unittest.TestCase):
                 self.assertEqual(is_applicable, expected_is_applicable, f"is_applicable mismatch for case '{case_label}'")
                 self.assertEqual(new_lr, expected_new_lr, f"new_lr mismatch for case '{case_label}'")
 
-unittest.main(argv=[''], verbosity=2, exit=False)
+if __name__ == '__main__':
+    unittest.main(argv=[''], verbosity=2, exit=False)

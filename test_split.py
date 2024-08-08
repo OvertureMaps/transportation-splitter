@@ -305,4 +305,5 @@ class TestSplitter(unittest.TestCase):
             assert(not has_consecutive_dupe_coords(actual.geometry))
             self.assertEqual(wkt.loads(expected), actual.geometry, f"Incorrect split number #{index}:\nexpected:\n{expected}\nbut got\n{str(actual.geometry)}")
 
-unittest.main(argv=[''], verbosity=2, exit=False)
+if __name__ == '__main__':
+    unittest.main(argv=[''], verbosity=2, exit=False)
