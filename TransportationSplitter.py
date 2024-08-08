@@ -251,11 +251,13 @@ def get_lrs(x):
                     output.append(lr)
     return output
 
-def is_lr_scope_covering_split(between, split_segment):
-    return (between[0] if between[0] else 0) >= split_segment.start_split_point.lr - LR_SPLIT_POINT_MIN_DIST_METERS and \
-           (between[1] if between[1] else 1) <= split_segment.end_split_point.lr + LR_SPLIT_POINT_MIN_DIST_METERS
+def is_lr_scope_covering_split(between, split_segment: SplitSegment, original_segment_length_meters, tolerance_meters=LR_SPLIT_POINT_MIN_DIST_METERS) -> bool:
+    lr_start_meters = (between[0] if between[0] else 0) * original_segment_length_meters
+    lr_end_meters = (between[0] if between[0] else 0) * original_segment_length_meters
+    return lr_start_meters >= split_segment.start_split_point.lr_meters - tolerance_meters and \
+           lr_end_meters <= split_segment.end_split_point.lr_meters + tolerance_meters
 
-def apply_lr_scope(x, split_segment, xpath = "$"):
+def apply_lr_scope(x, split_segment, original_segment_length, xpath = "$"):
     if x is None:
         return None
 
@@ -263,7 +265,7 @@ def apply_lr_scope(x, split_segment, xpath = "$"):
     if isinstance(x, list):
         output = []
         for index, sub_item in enumerate(x):
-            cleaned_sub_item = apply_lr_scope(sub_item, split_segment, f"{xpath}[{index}]")
+            cleaned_sub_item = apply_lr_scope(sub_item, split_segment, original_segment_length, f"{xpath}[{index}]")
             if cleaned_sub_item is not None:
                 output.append(cleaned_sub_item)
         return output if output else None
@@ -275,14 +277,14 @@ def apply_lr_scope(x, split_segment, xpath = "$"):
             if len(between) != 2:
                 raise Exception(f"{xpath}.{LR_SCOPE_KEY} has {str(len(between))} items, expecting 2 for a LR!")
 
-            if not is_lr_scope_covering_split(between, split_segment):
+            if not is_lr_scope_covering_split(between, split_segment, original_segment_length):
                 return None
 
         output = {}
         for key in x.keys():
             if key == LR_SCOPE_KEY:
                 continue
-            clean_sub_prop = apply_lr_scope(x[key], split_segment, f"{xpath}.{key}")
+            clean_sub_prop = apply_lr_scope(x[key], split_segment, original_segment_length, f"{xpath}.{key}")
             if clean_sub_prop is not None:
                 output[key] = clean_sub_prop
 
@@ -341,7 +343,7 @@ def get_trs(turn_restrictions, connector_ids):
 
     return trs_to_keep, flattened_tr_seq_items
 
-def get_split_segment_dict(original_segment_dict, split_segment, lr_columns_for_splitting):
+def get_split_segment_dict(original_segment_dict, original_segment_length, split_segment, lr_columns_for_splitting):
     modified_segment_dict = original_segment_dict.copy()
     #debug_messages.append("type(start_lr)=" + str(type(split_segment.start_split_point.lr)))
     #debug_messages.append("type(geometry)=" + str(type(wkb.dumps(split_segment.geometry))))
@@ -352,7 +354,7 @@ def get_split_segment_dict(original_segment_dict, split_segment, lr_columns_for_
     for column in lr_columns_for_splitting:
         if column not in modified_segment_dict or modified_segment_dict[column] is None:
             continue
-        modified_segment_dict[column] = apply_lr_scope(modified_segment_dict[column], split_segment)
+        modified_segment_dict[column] = apply_lr_scope(modified_segment_dict[column], split_segment, original_segment_length)
 
     if SPLIT_AT_CONNECTORS and PROHIBITED_TRANSITIONS_COLUMN in lr_columns_for_splitting:
         # remove turn restrictions that we're sure don't apply to this split and construct turn_restrictions field -
@@ -363,10 +365,14 @@ def get_split_segment_dict(original_segment_dict, split_segment, lr_columns_for_
 
     return modified_segment_dict
 
-def is_distinct_split_lr(lr1, lr2, segment_length):
-    return abs(lr1 - lr2) * segment_length > LR_SPLIT_POINT_MIN_DIST_METERS
+def is_distinct_split_lr(lr1, lr2, segment_length, min_dist_meters=LR_SPLIT_POINT_MIN_DIST_METERS):
+    return abs(lr1 - lr2) * segment_length > min_dist_meters
 
-def add_lr_split_points(split_points, lrs, segment_id, original_segment_geometry):
+def get_length(line_geometry: LineString):
+    geod = pyproj.Geod(ellps="WGS84")
+    return geod.geometry_length(line_geometry)
+
+def add_lr_split_points(split_points, lrs, segment_id, original_segment_geometry, line_length):
     """
     Split a line at linear reference points along its length
 
@@ -426,14 +432,13 @@ def add_lr_split_points(split_points, lrs, segment_id, original_segment_geometry
                 split_points.append(SplitPoint(f"{segment_id}@{str(lr)}", point_geometry, lr, lr_meters=lr * line_length, is_lr_added=True, at_coord_idx=coord_idx))
     return split_points
 
-def get_connector_split_points(connectors, original_segment_geometry):
+def get_connector_split_points(connectors, original_segment_geometry, original_segment_length):
     split_points = []
     if not connectors:
         return split_points
 
     # Get the length of the projected segment
     geod = pyproj.Geod(ellps="WGS84")
-    original_segment_length = geod.geometry_length(original_segment_geometry)
     original_segment_coords = list(original_segment_geometry.coords)
     sorted_valid_connectors = sorted([c for c in connectors if c.connector_geometry], key=lambda p: p.connector_index)
     connectors_queue = deque(sorted_valid_connectors)
@@ -562,9 +567,11 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
             for field_to_drop in input_fields_to_drop_in_splits:
                 original_segment_dict.pop(field_to_drop, None)
 
+            segment_length = get_length(input_segment.geometry)
             debug_messages.append(str(input_segment.geometry))
+            debug_messages.append(f"length={segment_length}")
 
-            split_points = get_connector_split_points(input_segment.joined_connectors, input_segment.geometry) if SPLIT_AT_CONNECTORS else []
+            split_points = get_connector_split_points(input_segment.joined_connectors, input_segment.geometry, segment_length) if SPLIT_AT_CONNECTORS else []
 
             debug_messages.append("adding lr split points...")
             lrs = []
@@ -577,7 +584,7 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
                     debug_messages.append(str(lr))
                 lrs = lrs + lrs_in_column
 
-            add_lr_split_points(split_points, lrs, original_segment_dict["id"], input_segment.geometry)
+            add_lr_split_points(split_points, lrs, original_segment_dict["id"], input_segment.geometry, segment_length)
 
             sorted_split_points = sorted(split_points, key=lambda p: p.lr)
             debug_messages.append("sorted final split points:")
@@ -593,7 +600,7 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
                 debug_messages.append(f"{split_segment.start_split_point.lr}-{split_segment.end_split_point.lr}: " + str(split_segment.geometry))
                 if not are_different_coords(list(split_segment.geometry.coords)[0], list(split_segment.geometry.coords)[-1]):
                     error_message += f"Wrong segment created: {split_segment.start_split_point.lr}-{split_segment.end_split_point.lr}: " + str(split_segment.geometry)
-                modified_segment_dict = get_split_segment_dict(original_segment_dict, split_segment, lr_columns_for_splitting)
+                modified_segment_dict = get_split_segment_dict(original_segment_dict, segment_length, split_segment, lr_columns_for_splitting)
                 split_segments_rows.append(Row(**modified_segment_dict))
 
             for split_point in split_points:
@@ -835,8 +842,8 @@ class TestSplitter(unittest.TestCase):
 
         input_segment_geometry = wkt.loads(input_segment_wkt)
         joined_connectors = [Connector(str(index), wkt.loads(point_wkt), index) for index, point_wkt in enumerate(split_points_wkts)]
-        
-        split_points = get_connector_split_points(joined_connectors, input_segment_geometry)
+        length = get_length(input_segment_geometry)
+        split_points = get_connector_split_points(joined_connectors, input_segment_geometry, length)
         sorted_split_points = sorted(split_points, key=lambda p: p.lr)
         split_segments = split_line(input_segment_geometry, sorted_split_points)
 
@@ -870,8 +877,8 @@ class TestSplitter(unittest.TestCase):
                     0
                 )
                 segment_geometry = wkt.loads(segment_geometry)
-
-                split_points = get_connector_split_points([connector], segment_geometry)
+                length = get_length(segment_geometry)
+                split_points = get_connector_split_points([connector], segment_geometry, length)
                 self.assertEqual(len(split_points), 1, f"Expected 1 split point to be added")
                 split_point = split_points[0]
                 self.assertEqual(split_point.id, connector.connector_id)
@@ -894,9 +901,11 @@ class TestSplitter(unittest.TestCase):
     ]
 
     def test_add_lr_split_points(self):
-        for expected_points, lrs, segment_geometry in self.all_lr_split_points_params:
-            with self.subTest(expected_points=expected_points, lrs=lrs, segment_geometry=segment_geometry):
-                split_points = add_lr_split_points([], lrs, "1", wkt.loads(segment_geometry))
+        for expected_points, lrs, segment_wkt in self.all_lr_split_points_params:
+            with self.subTest(expected_points=expected_points, lrs=lrs, segment_wkt=segment_wkt):
+                segment_geometry = wkt.loads(segment_wkt)
+                length = get_length(segment_geometry)
+                split_points = add_lr_split_points([], lrs, "1", segment_geometry, length)
                 self.assertEqual(len(split_points), len(expected_points))
                 for split_point, expected_point, lr in zip(split_points, expected_points, lrs):
                     self.assertEqual(split_point.id, f"1@{lr}")
@@ -1093,8 +1102,9 @@ class TestSplitter(unittest.TestCase):
     def split_line(self, segment_wkt:str, split_point_wkts: list[str], lrs: list[float]=[]) -> list[SplitSegment]:
         segment_geometry = wkt.loads(segment_wkt)
         joined_connectors = [Connector(str(i), wkt.loads(point_wkt), i) for i, point_wkt in enumerate(split_point_wkts)]
-        split_points: list[SplitPoint] = get_connector_split_points(joined_connectors, segment_geometry)        
-        add_lr_split_points(split_points, lrs, "", segment_geometry)
+        length = get_length(segment_geometry)
+        split_points: list[SplitPoint] = get_connector_split_points(joined_connectors, segment_geometry, length)
+        add_lr_split_points(split_points, lrs, "", segment_geometry, length)
         sorted_split_points = sorted(split_points, key=lambda p: p.lr)
         return split_line(segment_geometry, sorted_split_points)
     
