@@ -47,7 +47,7 @@ class SplitPoint:
         self.at_coord_idx = at_coord_idx
 
     def __repr__(self):
-        return f"SplitPoint(id={self.id!r}, at_coord_idx={self.at_coord_idx!r}, geometry={str(self.geometry)!r}, lr={self.lr!r}) ({self.lr_meters!r}m), is_lr_added={self.is_lr_added!r}"
+        return f"SplitPoint(at_coord_idx={str(self.at_coord_idx).rjust(3)}, geometry={str(self.geometry).ljust(40)}, lr={str(self.lr).ljust(22)}) ({str(self.lr_meters).ljust(22)}m), is_lr_added={self.is_lr_added}"
 
 class SplitSegment:
     """POCO to represent a split segment."""
@@ -58,15 +58,19 @@ class SplitSegment:
         self.end_split_point = end_split_point
 
     def __repr__(self):
-        return f"SplitSegment(id={self.id!r}, geometry={str(self.geometry)!r}, start_split_point={self.start_split_point!r}, end_split_point={self.end_split_point!r})"
+        return f"SplitSegment(id={self.id}, @{str(self.start_split_point.lr).ljust(20)} -{str(self.end_split_point.lr).rjust(20)} length={str(self.length).rjust(22)}, geometry={str(self.geometry)})"
+    
+    @property
+    def length(self) -> float:
+        return self.end_split_point.lr_meters - self.start_split_point.lr_meters
 
 
 def read_parquet(spark, path, merge_schema=False):
     return spark.read.option("mergeSchema", str(merge_schema).lower()).parquet(path)
 
-def is_geoparquet(spark, input_path, limit=1, geometry_column="geometry"):
+def is_geoparquet(spark, input_path, limit=1, geometry_column="geometry", merge_schema=False):
     try:
-        sample_data = spark.read.format("geoparquet").option("mergeSchema", str(merge_schema).lower()).load(path).limit(1)
+        sample_data = spark.read.format("geoparquet").option("mergeSchema", str(merge_schema).lower()).load(input_path).limit(limit)
         geometry_column_data_type = sample_data.schema[geometry_column].dataType
         # GeoParquet uses GeometryType, and WKB uses BinaryType
         return str(geometry_column_data_type) == "GeometryType()"
@@ -268,7 +272,7 @@ def apply_lr_on_split(
         split_segment: SplitSegment, 
         original_segment_length, 
         min_overlapping_length_meters=LR_SPLIT_POINT_MIN_DIST_METERS) -> tuple[bool, Optional[list[float]]]:
-    split_length = split_segment.end_split_point.lr_meters - split_segment.start_split_point.lr_meters
+    split_length = split_segment.length
     lr_start_meters = (original_lr[0] if original_lr[0] else 0) * original_segment_length
     lr_end_meters = (original_lr[1] if original_lr[1] else 1) * original_segment_length
     
@@ -534,7 +538,8 @@ def get_connector_split_points(connectors, original_segment_geometry, original_s
 
 additional_fields_in_split_segments = [
     StructField("start_lr", DoubleType(), True),
-    StructField("end_lr", DoubleType(), True)
+    StructField("end_lr", DoubleType(), True),
+    StructField("metrics", MapType(StringType(), StringType()), True)
 ]
 flattened_tr_info_schema = ArrayType(StructType([
     StructField("tr_index", IntegerType(), True),
@@ -614,6 +619,7 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
             original_segment_dict = input_segment.asDict(recursive=True)
             for field_to_drop in input_fields_to_drop_in_splits:
                 original_segment_dict.pop(field_to_drop, None)
+            original_segment_dict["metrics"] = {}
 
             segment_length = get_length(input_segment.geometry)
             debug_messages.append(str(input_segment.geometry))
@@ -637,7 +643,7 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
             sorted_split_points = sorted(split_points, key=lambda p: p.lr)
             debug_messages.append("sorted final split points:")
             for p in sorted_split_points:
-                debug_messages.append(", ".join([p.id, str(p.geometry), str(p.lr)]))
+                debug_messages.append(p)
 
             if len(sorted_split_points) < 2:
                 raise Exception(f"Unexpected number of split points: {str(len(sorted_split_points))}; (expected at least 2)")
@@ -645,10 +651,12 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
             #debug_messages.append("splitting into segments...")
             split_segments = split_line(input_segment.geometry, sorted_split_points)
             for split_segment in split_segments:
-                debug_messages.append(f"{split_segment.start_split_point.lr}-{split_segment.end_split_point.lr}: " + str(split_segment.geometry))
+                debug_messages.append(f"{split_segment.start_split_point.lr}-{split_segment.end_split_point.lr}: " + str(split_segment))
                 if not are_different_coords(list(split_segment.geometry.coords)[0], list(split_segment.geometry.coords)[-1]):
                     error_message += f"Wrong segment created: {split_segment.start_split_point.lr}-{split_segment.end_split_point.lr}: " + str(split_segment.geometry)
                 modified_segment_dict = get_split_segment_dict(original_segment_dict, segment_length, split_segment, lr_columns_for_splitting)
+                modified_segment_dict["metrics"]["length"] = str(split_segment.length)
+                modified_segment_dict["metrics"]["is_simple"] = str(split_segment.geometry.is_simple)
                 split_segments_rows.append(Row(**modified_segment_dict))
 
             for split_point in split_points:
