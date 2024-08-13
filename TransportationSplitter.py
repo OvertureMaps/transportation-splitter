@@ -7,7 +7,7 @@
 # COMMAND ----------
 
 from collections import deque
-from pyspark.sql.functions import expr, lit, col, explode, collect_list, struct, udf, struct, count, when, size, split, element_at, coalesce
+from pyspark.sql.functions import expr, lit, col, explode, collect_list, struct, udf, struct, count, when, size, split, element_at, coalesce, round as _round
 from pyspark.sql.types import *
 from pyspark.sql.utils import AnalysisException
 from pyspark.sql import DataFrame, functions as F
@@ -395,12 +395,33 @@ def get_trs(turn_restrictions, connector_ids):
 
     return trs_to_keep, flattened_tr_seq_items
 
-def get_split_segment_dict(original_segment_dict, original_segment_length, split_segment, lr_columns_for_splitting):
+def get_length_bucket(length):
+    if length <= 0.01:
+        return "A. <=1cm"
+    if length <= 0.1:
+        return "B. 1cm-10cm"
+    if length <= 1:
+        return "C. 10cm-1m"
+    if length <= 100:
+        return "D. 1m-100m"
+    if length <= 1000:
+        return "E. 100m-1km"
+    if length <= 10000:
+        return "F. 1km-10km"
+    return "G. >10km"
+
+def get_split_segment_dict(original_segment_dict, original_segment_geometry, original_segment_length, split_segment, lr_columns_for_splitting):
     modified_segment_dict = original_segment_dict.copy()
     #debug_messages.append("type(start_lr)=" + str(type(split_segment.start_split_point.lr)))
     #debug_messages.append("type(geometry)=" + str(type(wkb.dumps(split_segment.geometry))))
     modified_segment_dict["start_lr"] = float(split_segment.start_split_point.lr)
     modified_segment_dict["end_lr"] = float(split_segment.end_split_point.lr)
+    modified_segment_dict["metrics"] = {}
+    modified_segment_dict["metrics"]["length"] = get_length_bucket(split_segment.length)
+    if not original_segment_geometry.is_simple:
+        modified_segment_dict["metrics"]["original_self_intersecting"] = "true"
+    if not split_segment.geometry.is_simple:
+        modified_segment_dict["metrics"]["split_self_intersecting"] = "true"    
     modified_segment_dict["geometry"] = split_segment.geometry
     modified_segment_dict["connector_ids"] = [split_segment.start_split_point.id, split_segment.end_split_point.id]
     for column in lr_columns_for_splitting:
@@ -647,7 +668,6 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
             original_segment_dict = input_segment.asDict(recursive=True)
             for field_to_drop in input_fields_to_drop_in_splits:
                 original_segment_dict.pop(field_to_drop, None)
-            original_segment_dict["metrics"] = {}
 
             segment_length = get_length(input_segment.geometry)
             debug_messages.append(str(input_segment.geometry))
@@ -671,7 +691,7 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
             sorted_split_points = sorted(split_points, key=lambda p: p.lr)
             debug_messages.append("sorted final split points:")
             for p in sorted_split_points:
-                debug_messages.append(p)
+                debug_messages.append(str(p))
 
             if len(sorted_split_points) < 2:
                 raise Exception(f"Unexpected number of split points: {str(len(sorted_split_points))}; (expected at least 2)")
@@ -682,9 +702,7 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
                 debug_messages.append(f"{split_segment.start_split_point.lr}-{split_segment.end_split_point.lr}: " + str(split_segment))
                 if not are_different_coords(list(split_segment.geometry.coords)[0], list(split_segment.geometry.coords)[-1]):
                     error_message += f"Wrong segment created: {split_segment.start_split_point.lr}-{split_segment.end_split_point.lr}: " + str(split_segment.geometry)
-                modified_segment_dict = get_split_segment_dict(original_segment_dict, segment_length, split_segment, lr_columns_for_splitting)
-                modified_segment_dict["metrics"]["length"] = str(split_segment.length)
-                modified_segment_dict["metrics"]["is_simple"] = str(split_segment.geometry.is_simple)
+                modified_segment_dict = get_split_segment_dict(original_segment_dict, input_segment.geometry, segment_length, split_segment, lr_columns_for_splitting)
                 split_segments_rows.append(Row(**modified_segment_dict))
 
             for split_point in split_points:
@@ -787,6 +805,14 @@ def resolve_tr_references(result_df):
         .withColumn(PROHIBITED_TRANSITIONS_COLUMN, apply_tr_split_refs_udf(col(PROHIBITED_TRANSITIONS_COLUMN), col("turn_restrictions")))
     return result_trs_resolved_df
 
+def get_aggregated_metrics(result_df):
+    segments_df = result_df.filter("type='segment'")
+    total_row_count = segments_df.count()
+    print(total_row_count)
+    metrics_df = result_df.select(col("id"), explode(col("metrics")).alias("key", "value")).groupBy("key", "value").agg(count("value").alias("value_count"))
+    metrics_df = metrics_df.withColumn("percentage", _round((col("value_count") / total_row_count) * 100, 2))
+    return metrics_df.orderBy('key', 'value')
+
 def split_transportation(spark, input_path, output_path, filter_wkt=None, reuse_existing_intermediate_outputs=True):
     output_path = output_path.rstrip('/')
     print(f"filter_wkt: {filter_wkt}")
@@ -884,7 +910,10 @@ def split_transportation(spark, input_path, output_path, filter_wkt=None, reuse_
     write_geoparquet(final_df, output_path)
     loaded_final_df = read_geoparquet(spark, output_path)
     loaded_final_df.groupBy("type").agg(count("*").alias("count")).show()
-    
+
+    print("split segments metrics:")
+    get_aggregated_metrics(loaded_final_df).show()
+        
     return loaded_final_df
 
 class Connector(NamedTuple):
