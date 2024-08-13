@@ -304,8 +304,8 @@ class TestSplitter(unittest.TestCase):
             [
                 "LINESTRING (-70.2783138 -32.939523, -70.2782842 -32.9397871, -70.2782972 -32.9400571, -70.2783605 -32.9407098, -70.2783461 -32.9408741, -70.2783056 -32.9409369)",             
                 "LINESTRING (-70.2783056 -32.9409369, -70.2782786 -32.9409789)",
-                "LINESTRING (-70.2782786 -32.9409789, -70.2782741 -32.9409893)",
-                "LINESTRING (-70.2782741 -32.9409893, -70.278256 -32.9410316, -70.2782741 -32.9409893, -70.2782321 -32.9410874, -70.2775468 -32.942185, -70.2774811 -32.942519)" # TODO: This is invalid (self-intersecting) - fix by snapping the split to the coordinate index 
+                "LINESTRING (-70.2782786 -32.9409789, -70.278256 -32.9410316, -70.2782741 -32.9409893)",
+                "LINESTRING (-70.2782741 -32.9409893, -70.2782321 -32.9410874, -70.2775468 -32.942185, -70.2774811 -32.942519)"
             ]
          ),
         (
@@ -331,9 +331,9 @@ class TestSplitter(unittest.TestCase):
     ]
     def test_split_line_all_cases(self):
         debug_filter_case = None
-        #debug_filter_case = "086ce9c607ffffff04657e94ff0a6881"
+        debug_filter_case = ""
         for case_label, segment_wkt, connector_wkts, lrs, expected_split_wkts in self.split_line_params:
-            if debug_filter_case and debug_filter_case not in debug_filter_case:
+            if debug_filter_case and case_label not in debug_filter_case:
                 continue
             with self.subTest(case_label=case_label, segment_wkt=segment_wkt, connector_wkts=connector_wkts, lrs=lrs, expected_split_wkts=expected_split_wkts):
                 split_segments = self.split_line(segment_wkt, connector_wkts, lrs)

@@ -494,6 +494,35 @@ def get_connector_split_points(connectors, original_segment_geometry, original_s
     original_segment_coords = list(original_segment_geometry.coords)
     sorted_valid_connectors = sorted([c for c in connectors if c.connector_geometry], key=lambda p: p.connector_index)
     connectors_queue = deque(sorted_valid_connectors)
+        
+    # Pass 1 - connector coordinates have exact match in the segment's coordinates
+    coord_count = len(original_segment_coords)
+    
+    # edge case first - if last connector matches the last coordinate then LR should be 1,
+    # no matter if the same coordinate may also appear somewhere else in the middle of the segment
+    last_connector = connectors_queue[-1]
+    if not are_different_coords(last_connector.connector_geometry.coords[0], original_segment_coords[-1]):
+        split_points.append(SplitPoint(last_connector.connector_id, last_connector.connector_geometry, lr=1, lr_meters=original_segment_length, is_lr_added=False, at_coord_idx=coord_count-1))
+        connectors_queue.pop()
+
+    lr_meters = 0
+    for coord_idx in range(0, coord_count):
+        for connector in list(connectors_queue):
+            connector_geometry = connector.connector_geometry
+            if not are_different_coords(connector_geometry.coords[0], original_segment_coords[coord_idx]):
+                lr = lr_meters / original_segment_length
+                split_points.append(SplitPoint(connector.connector_id, connector_geometry, lr, lr_meters, is_lr_added=False, at_coord_idx=coord_idx))
+                connectors_queue.remove(connector)
+        if coord_idx < coord_count - 1:
+            sub_segment = LineString([original_segment_coords[coord_idx], original_segment_coords[coord_idx+1]])
+            sub_segment_length = geod.geometry_length(sub_segment)
+            lr_meters += sub_segment_length
+    
+    if not connectors_queue:
+        return split_points
+
+    # Pass 2 - fallback if some connectors don't match exactly the coordinates, 
+    # find which consecutive coord pair sub-segment it lies on
     coord_idx = 0 
     accumulated_segment_length = 0
     for (lon1, lat1), (lon2, lat2) in zip(original_segment_coords[:-1], original_segment_coords[1:]):
@@ -501,19 +530,18 @@ def get_connector_split_points(connectors, original_segment_geometry, original_s
         sub_segment_length = geod.geometry_length(sub_segment)
         
         while connectors_queue:
-            next_connector = connectors_queue[0]
-            next_connector_geometry = next_connector.connector_geometry               
+            connector = connectors_queue[0]
+            connector_geometry = connector.connector_geometry
 
             # Calculate the distances between points 1 and 2 of the sub-segment and the connector
             _, _, dist12 = geod.inv(lon1, lat1, lon2, lat2)
-            _, _, dist1c = geod.inv(lon1, lat1, next_connector_geometry.x, next_connector_geometry.y)
-            _, _, dist2c = geod.inv(lon2, lat2, next_connector_geometry.x, next_connector_geometry.y)            
+            _, _, dist1c = geod.inv(lon1, lat1, connector_geometry.x, connector_geometry.y)
+            _, _, dist2c = geod.inv(lon2, lat2, connector_geometry.x, connector_geometry.y)            
                     
-
             dist_diff = abs(dist1c + dist2c - dist12)
             if dist_diff < IS_ON_SUB_SEGMENT_THRESHOLD_METERS:
 
-                if len(connectors_queue) == 1 and not are_different_coords(next_connector_geometry.coords[0], original_segment_coords[-1]):
+                if len(connectors_queue) == 1 and not are_different_coords(connector_geometry.coords[0], original_segment_coords[-1]):
                     # edge case first - if this is the last connector, and it matches the last coordinate then LR should be 1,
                     # no matter if the same coordinate may also appear here, somewhere else in the middle of the segment
                     at_coord_idx = len(original_segment_coords) - 1
@@ -524,7 +552,7 @@ def get_connector_split_points(connectors, original_segment_geometry, original_s
                     lr_meters = accumulated_segment_length + offset_on_segment_meters
 
                 lr = lr_meters / original_segment_length
-                split_points.append(SplitPoint(next_connector.connector_id, next_connector_geometry, lr, lr_meters, is_lr_added=False, at_coord_idx=at_coord_idx))
+                split_points.append(SplitPoint(connector.connector_id, connector_geometry, lr, lr_meters, is_lr_added=False, at_coord_idx=at_coord_idx))
                 connectors_queue.popleft()
             else:
                 # next connector is not on this segment, move to next segment
