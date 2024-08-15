@@ -1,11 +1,3 @@
-# Databricks notebook source
-# MAGIC %md
-# MAGIC Please see instructions and details [here](https://github.com/OvertureMaps/transportation-splitter/blob/main/README.md).
-# MAGIC
-# MAGIC # AWS Glue notebook - see instructions for magic commands
-
-# COMMAND ----------
-
 from collections import deque
 from pyspark.sql.functions import expr, lit, col, explode, collect_list, struct, udf, struct, count, when, size, split, element_at, coalesce, round as _round
 from pyspark.sql.types import *
@@ -395,6 +387,32 @@ def get_trs(turn_restrictions, connector_ids):
 
     return trs_to_keep, flattened_tr_seq_items
 
+def get_destinations(destinations, connector_ids):
+    if destinations is None:
+        return None    
+    destinations_to_keep = [d for d in destinations if destination_applies_to_split_connectors(d, connector_ids)]     
+    return destinations_to_keep if destinations_to_keep else None
+
+def destination_applies_to_split_connectors(d, connector_ids):
+    if not connector_ids or len(connector_ids) != 2:
+        # at this point modified segments are expected to have exactly two connector ids, skip edge cases that don't
+        return False
+    when_heading = d.get("when", {}).get("heading")
+    from_connector_id = d.get("from_connector_id")
+    if not from_connector_id or not when_heading:
+        #these are required properties and need them to exist to resolve the split reference
+        return False
+    if when_heading == "forward" and connector_ids[1] != from_connector_id:
+        # the second connector id on this segment split needs to match the from_connector_id in the destination because heading scope applies only to forward
+        return False
+    if when_heading == "backward" and connector_ids[0] != from_connector_id:
+        # the first connector id on this segment split needs to match the from_connector_id in the destination because heading scope applies only to backward
+        return False
+    if from_connector_id not in connector_ids:
+        # the from_connector_id needs to be in this split's connector_ids no matter what
+        return False
+    return True
+
 def get_length_bucket(length):
     if length <= 0.01:
         return "A. <=1cm"
@@ -429,12 +447,16 @@ def get_split_segment_dict(original_segment_dict, original_segment_geometry, ori
             continue
         modified_segment_dict[column] = apply_lr_scope(modified_segment_dict[column], split_segment, original_segment_length)
 
-    if SPLIT_AT_CONNECTORS and PROHIBITED_TRANSITIONS_COLUMN in lr_columns_for_splitting:
+    if PROHIBITED_TRANSITIONS_COLUMN in lr_columns_for_splitting:
         # remove turn restrictions that we're sure don't apply to this split and construct turn_restrictions field -
         # this is a flat list of all segment_id referenced in sequences;
         # used to resolve segment references after split - for each TR segment_id reference we need to identify which of the splits to retain as reference
         prohibited_transitions = modified_segment_dict.get(PROHIBITED_TRANSITIONS_COLUMN) or {}
         modified_segment_dict[PROHIBITED_TRANSITIONS_COLUMN], modified_segment_dict["turn_restrictions"] = get_trs(prohibited_transitions, modified_segment_dict["connector_ids"])
+
+    if DESTINATIONS_COLUMN in original_segment_dict:
+        destinations = modified_segment_dict.get(DESTINATIONS_COLUMN)
+        modified_segment_dict[DESTINATIONS_COLUMN] = get_destinations(destinations, modified_segment_dict["connector_ids"])
 
     return modified_segment_dict
 
@@ -630,12 +652,32 @@ resolved_prohibited_transitions_schema = ArrayType(
     ])
 )
 
+resolved_destinations_schema = ArrayType(
+    StructType([
+        StructField('labels', ArrayType(
+            StructType([
+                StructField('value', StringType(), True), 
+                StructField('type', StringType(), True)
+                ]), True), 
+            True), 
+        StructField('symbols', ArrayType(StringType(), True), True), 
+        StructField('from_connector_id', StringType(), True), 
+        StructField('to_segment_id', StringType(), True), 
+        StructField('to_segment_start_lr', DoubleType(), True), 
+        StructField('to_segment_end_lr', DoubleType(), True), 
+        StructField('to_connector_id', StringType(), True), 
+        StructField('when', StructType([
+            StructField('heading', StringType(), True)
+            ]), True), 
+        StructField('final_heading', StringType(), True)
+        ]), False)
+
 def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) -> DataFrame:
     broadcast_lr_columns_for_splitting = sc.broadcast(lr_columns_for_splitting)    
     input_fields_to_drop_in_splits = ["joined_connectors"]
     transportation_feature_schema = StructType([field for field in df.schema.fields if field.name not in input_fields_to_drop_in_splits])
     split_segment_fields = [field for field in transportation_feature_schema] + additional_fields_in_split_segments
-    if PROHIBITED_TRANSITIONS_COLUMN in lr_columns_for_splitting:
+    if PROHIBITED_TRANSITIONS_COLUMN in df.columns:
         split_segment_fields += [ StructField("turn_restrictions", flattened_tr_info_schema, True) ]
 
     split_segment_schema = StructType(split_segment_fields)
@@ -805,6 +847,44 @@ def resolve_tr_references(result_df):
         .withColumn(PROHIBITED_TRANSITIONS_COLUMN, apply_tr_split_refs_udf(col(PROHIBITED_TRANSITIONS_COLUMN), col("turn_restrictions")))
     return result_trs_resolved_df
 
+def resolve_destinations_references(result_df):
+    splits_w_destinations_df = result_df.filter(f"{DESTINATIONS_COLUMN} is not null and size({DESTINATIONS_COLUMN})>0").select("id", "start_lr", "end_lr", DESTINATIONS_COLUMN).withColumn("dr", F.explode(DESTINATIONS_COLUMN)).select("*", "dr.*").drop("dr")
+
+    referenced_segment_ids_df = splits_w_destinations_df.select(col("to_segment_id").alias("referenced_segment_id")).distinct()
+
+    referenced_splits_info_df = referenced_segment_ids_df.join(
+        result_df,
+        result_df.id == referenced_segment_ids_df.referenced_segment_id,
+        "inner").select(col("id").alias("ref_id"), col("start_lr").alias("to_segment_start_lr"), col("end_lr").alias("to_segment_end_lr"), col("connector_ids").alias("ref_connector_ids"))
+
+    ref_joined_df = splits_w_destinations_df.join(
+        referenced_splits_info_df,
+        splits_w_destinations_df.to_segment_id == referenced_splits_info_df.ref_id,
+        "inner"
+    ).select(
+        splits_w_destinations_df["*"],
+        referenced_splits_info_df["*"]
+    ).drop("segment_id")
+
+    referenced_split_condition = F.when(F.col("final_heading") == "forward",
+        F.col("ref_connector_ids")[0] == F.col("to_connector_id")).otherwise(
+        F.col("ref_connector_ids")[1] == F.col("to_connector_id"))
+
+    destination_refs_resolved_df = ref_joined_df.filter(referenced_split_condition).select(
+        col("id").alias("from_id"),
+        col("start_lr").alias("from_start_lr"),
+        col("end_lr").alias("from_end_lr"),
+        struct( "labels", "symbols", "from_connector_id", "to_segment_id","to_segment_start_lr", "to_segment_end_lr", "to_connector_id", "when", "final_heading").alias("d"))
+
+    destination_refs_resolved_agg_df = destination_refs_resolved_df.groupBy("from_id", "from_start_lr", "from_end_lr").agg(collect_list("d").alias(f"{DESTINATIONS_COLUMN}_resolved"))
+
+    result_w_destinations_resolved_df = result_df.drop("destinations").join(
+        destination_refs_resolved_agg_df,
+        (result_df.id == destination_refs_resolved_agg_df.from_id) & (result_df.start_lr == destination_refs_resolved_agg_df.from_start_lr) & (result_df.end_lr == destination_refs_resolved_agg_df.from_end_lr),
+        "left").drop("from_id", "from_start_lr", "from_end_lr").withColumnRenamed(f"{DESTINATIONS_COLUMN}_resolved", DESTINATIONS_COLUMN)
+    
+    return result_w_destinations_resolved_df
+
 def get_aggregated_metrics(result_df):
     segments_df = result_df.filter("type='segment'")
     total_row_count = segments_df.count()
@@ -896,11 +976,15 @@ def split_transportation(spark, input_path, output_path, filter_wkt=None, reuse_
     final_segments_df.groupBy("id").agg(count("*").alias("number_of_splits")).groupBy("number_of_splits").agg(count("*")).orderBy("number_of_splits").show()
 
     all_connectors_df = filtered_df.filter("type == 'connector'").unionByName(added_connectors_df).select(filtered_df.columns)
-    if SPLIT_AT_CONNECTORS and PROHIBITED_TRANSITIONS_COLUMN in lr_columns_for_splitting:
+    if PROHIBITED_TRANSITIONS_COLUMN in lr_columns_for_splitting:
         final_segments_df = resolve_tr_references(final_segments_df)
 
         # if we're resolving TR refs we need to set the schema with start_lr, end_lr fields for connectors too, so that the union can work:
         all_connectors_df = all_connectors_df.drop(PROHIBITED_TRANSITIONS_COLUMN).withColumn(PROHIBITED_TRANSITIONS_COLUMN, lit(None).cast(resolved_prohibited_transitions_schema))
+
+    if DESTINATIONS_COLUMN in final_segments_df.columns:
+        final_segments_df = resolve_destinations_references(final_segments_df)        
+        all_connectors_df = all_connectors_df.drop(DESTINATIONS_COLUMN).withColumn(DESTINATIONS_COLUMN, lit(None).cast(resolved_destinations_schema))
 
     extra_columns = [field.name for field in additional_fields_in_split_segments if field.name != "turn_restrictions"]    
     for extra_col in extra_columns:
