@@ -1,3 +1,11 @@
+# Databricks notebook source
+# MAGIC %md
+# MAGIC Please see instructions and details [here](https://github.com/OvertureMaps/transportation-splitter/blob/main/README.md).
+# MAGIC
+# MAGIC # AWS Glue notebook - see instructions for magic commands
+
+# COMMAND ----------
+
 from collections import deque
 from pyspark.sql.functions import expr, lit, col, explode, collect_list, struct, udf, struct, count, when, size, split, element_at, coalesce, round as _round
 from pyspark.sql.types import *
