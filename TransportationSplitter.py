@@ -200,9 +200,8 @@ def has_consecutive_dupe_coords(line: LineString) -> bool:
     coordinates = list(line.coords)
     return any(coordinates[i] == coordinates[i - 1] for i in range(1, len(coordinates)))
 
-def get_split_line_geometry(coordinates):
-    filtered_coords = [coordinates[i] for i in range(len(coordinates)) if i == 0 or coordinates[i] != coordinates[i - 1]]
-    return LineString(filtered_coords)
+def remove_consecutive_dupes(coordinates):
+    return [coordinates[i] for i in range(len(coordinates)) if i == 0 or coordinates[i] != coordinates[i - 1]]
 
 def are_different_coords(coords1, coords2):
     return coords1[0] != coords2[0] or coords1[1] != coords2[1]
@@ -217,8 +216,7 @@ def split_line(original_line_geometry: LineString, split_points: list[SplitPoint
     if len(split_points) == 2 and split_points[0].lr == 0 and split_points[1].lr == 1:
         return [SplitSegment(0, original_line_geometry, split_points[0], split_points[1])]
 
-    split_segments = []
-    i=0
+    split_segments: list[SplitSegment] = []
     for split_point_start, split_point_end in zip(split_points[:-1], split_points[1:]):
         idx_start = split_point_start.at_coord_idx + 1
         idx_end = split_point_end.at_coord_idx + 1
@@ -227,9 +225,11 @@ def split_line(original_line_geometry: LineString, split_points: list[SplitPoint
             original_line_geometry.coords[idx_start:idx_end] +\
             list(split_point_end.geometry.coords)
 
-        geom = get_split_line_geometry(coords)
-        split_segments.append(SplitSegment(i, geom, split_point_start, split_point_end))
-        i += 1
+        deduped_coords = remove_consecutive_dupes(coords)
+        if len(deduped_coords) > 1:
+            # edge case - only one point after removing dupes is just ignored
+            geom = LineString(deduped_coords)
+            split_segments.append(SplitSegment(len(split_segments), geom, split_point_start, split_point_end))
     return split_segments
 
 def get_lrs(x):
@@ -545,6 +545,8 @@ def get_connector_split_points(connectors, original_segment_geometry, original_s
     original_segment_coords = list(original_segment_geometry.coords)
     sorted_valid_connectors = sorted([c for c in connectors if c.connector_geometry], key=lambda p: p.connector_index)
     connectors_queue = deque(sorted_valid_connectors)
+    if not connectors_queue:
+        return split_points
         
     # Pass 1 - connector coordinates have exact match in the segment's coordinates
     coord_count = len(original_segment_coords)
@@ -726,16 +728,17 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
             split_points = get_connector_split_points(input_segment.joined_connectors, input_segment.geometry, segment_length) if SPLIT_AT_CONNECTORS else []
 
             debug_messages.append("adding lr split points...")
-            lrs = []
+            lrs_set = set()
             for column in lr_columns_for_splitting:
                 debug_messages.append(f"LRs in [{column}]:")
                 if column not in original_segment_dict or original_segment_dict[column] is None:
                     continue
                 lrs_in_column = get_lrs(original_segment_dict[column])
-                for lr in lrs_in_column:
-                    debug_messages.append(str(lr))
-                lrs = lrs + lrs_in_column
+                debug_messages.append(str(lrs_in_column))
+                lrs_set.update(lrs_in_column)
 
+            lrs = sorted(lrs_set)
+            debug_messages.append(f"Final LRs set sorted: {lrs}")
             add_lr_split_points(split_points, lrs, original_segment_dict["id"], input_segment.geometry, segment_length)
 
             sorted_split_points = sorted(split_points, key=lambda p: p.lr)
