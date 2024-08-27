@@ -496,7 +496,6 @@ def add_lr_split_points(split_points, lrs, segment_id, original_segment_geometry
 
     # Get the length of the projected segment
     geod = pyproj.Geod(ellps="WGS84")
-    line_length = geod.geometry_length(original_segment_geometry)
     coords = list(original_segment_geometry.coords)
 
     for lr in lrs:
