@@ -724,7 +724,9 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
             debug_messages.append(str(input_segment.geometry))
             debug_messages.append(f"length={segment_length}")
 
-            split_points = get_connector_split_points(input_segment.joined_connectors, input_segment.geometry, segment_length) if SPLIT_AT_CONNECTORS else []
+            split_points = get_connector_split_points(input_segment.joined_connectors, input_segment.geometry, segment_length)
+            if not SPLIT_AT_CONNECTORS:
+                split_points = [split_points[0], split_points[-1]]
 
             debug_messages.append("adding lr split points...")
             lrs_set = set()
