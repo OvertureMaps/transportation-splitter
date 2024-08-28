@@ -20,7 +20,7 @@ Note: An effective Meeting Agenda enable teams to organize its topics and give a
 
 ### Meeting Minutes
 
-``` 
+```
 Note: It is important to record the key issues discussed during the meeting, motions proposed or voted, and activities to be undertaken.
 Also, it should be recorded meeting attendance, specially if there is a voting requirement associated with members attendance.
 
@@ -32,7 +32,7 @@ It is recommended to define an Agenda & Meeting Minutes template.
 ### Decision Making
 
 ```
-Note: the following bullet points needs to be reviewed by the group: 3.1, 3.1 and 3.2 
+Note: the following bullet points needs to be reviewed by the group: 3.1, 3.1 and 3.2
 This is to ensure that the fact of having memberships levels doesn't contradicts these rules
 ```
 
@@ -61,52 +61,52 @@ Inspired by American National Standards Institute’s (ANSI) Essential Requireme
 ```
 
 As part of their responsibilities defined in [from WG Maintainers](#from-wg-maintainers), Maintainers need to ensure efficient and effective decision-making:
-* The decision making process in WGs is intended to be as inclusive as possible. 
-* WGs shall attempt to use consensus to make decisions. 
-* If consensus cannot be reached, voting mechanisms MAY be used. 
+* The decision making process in WGs is intended to be as inclusive as possible.
+* WGs shall attempt to use consensus to make decisions.
+* If consensus cannot be reached, voting mechanisms MAY be used.
 * Formal notice SHALL be given for decision making, e.g.:
   * Inclusion of a document on an agenda, proposing a specific decision to be taken (e.g. Pull Request).
   * Inclusion of an item directly in the agenda (e.g. proposed next meeting date).
   * Items proposed for approval via the group mailing list (e.g. agreement a document revision).
   * Inclusion of a document for decision in an electronic Review, Comment and Approval event
   * Inclusion of a document for decision in an e-vote (Supermajority) vote.
- 
+
  > The above list is not exhaustive.
 
 * There SHALL be no distinction in the decision-making merit of real-time or non-real-time meetings.
-  * In real-time meetings, consensus can be determined by receiving no sustained objections to a proposal. 
+  * In real-time meetings, consensus can be determined by receiving no sustained objections to a proposal.
   * In non-real-time meetings, consensus SHOULD be developed using Review, Comment and Agreement periods, e.g. using [Review and Approval](#[Organization_Abbreviation]-approval-process)
-* Proposals SHALL be available for a given period. 
+* Proposals SHALL be available for a given period.
 
 
 ### Seeking Consensus
-* Groups shall endeavour to reach consensus on all decisions. 
+* Groups shall endeavour to reach consensus on all decisions.
 * Informal methods of reaching consensus are encouraged (e.g. a show of hands).
-* Groups SHOULD attempt to ensure contributions relating to the same subject matter are considered together before being disposed. 
+* Groups SHOULD attempt to ensure contributions relating to the same subject matter are considered together before being disposed.
 * However the Maintainer SHALL ensure that progress is not delayed by unavailable contributions or participants.
 * Agreement SHALL be sought in all forms of meeting.
 
 ### Handling objections when seeking consensus
-* Objections from a small minority SHOULD be minuted and the objecting delegates SHOULD be questioned if having their objections minuted is sufficient and they agree to not sustain their objections. 
-  * If such agreements are secured, then there is consensus for approving the proposal. 
-  * If such agreements are not secured, then the proposal is not agreed and further action SHALL be taken (e.g. the proposal is withdrawn, updated, or voted on). 
+* Objections from a small minority SHOULD be minuted and the objecting delegates SHOULD be questioned if having their objections minuted is sufficient and they agree to not sustain their objections.
+  * If such agreements are secured, then there is consensus for approving the proposal.
+  * If such agreements are not secured, then the proposal is not agreed and further action SHALL be taken (e.g. the proposal is withdrawn, updated, or voted on).
   * Members are discouraged from sustaining their objections when it is clear that they would be overruled by a vote were one to take place.
 * In real-time meetings, consensus can be determined by receiving no sustained objections to a proposal.
   * Efforts to immediately resolve or record objections can be taken to attempt to achieve consensus.
-* Where attendance is sparse when viewed from normal participation levels, potentially controversial proposals SHOULD be made available to the broader membership. 
-* The Maintainer is responsible for ensuring such opportunity for participation in the decision making process. 
+* Where attendance is sparse when viewed from normal participation levels, potentially controversial proposals SHOULD be made available to the broader membership.
+* The Maintainer is responsible for ensuring such opportunity for participation in the decision making process.
 * Sparsely attended meetings SHOULD NOT be used to drive through proposals that would not have broad support.
-* Following a decision-making meeting, a summary of decisions and document dispositions SHALL be published as soon as is practical. 
+* Following a decision-making meeting, a summary of decisions and document dispositions SHALL be published as soon as is practical.
   * This will be addressed if the meeting minutes are available in a timely fashion.
-* When there is insufficient time for review in a real-time meeting, non-real-time consensus approaches SHOULD be considered.  
+* When there is insufficient time for review in a real-time meeting, non-real-time consensus approaches SHOULD be considered.
 * In non-real time meetings consensus SHOULD be developed by using [Review and Approval](#[Organization_Abbreviation]-approval-process) periods.
   * Using the group mailing list
   * Using GitHub "Review and Approval" label
 * Proposals SHALL be available for a given period.
 
-## Using Supermajority vote to achieve agreement 
+## Using Supermajority vote to achieve agreement
 ### Phrasing of Voting Questions
-* The Maintainer ensures that questions to be voted upon SHALL be phrased in a concise and unambiguous manner. 
+* The Maintainer ensures that questions to be voted upon SHALL be phrased in a concise and unambiguous manner.
 * Questions SHOULD NOT be phrased as the “The group SHALL not do xyz”. Examples of appropriate questions are:
   * SHALL the group agree the Specification?
   * SHALL the liaison be approved?
@@ -130,7 +130,7 @@ Note: Define Supermajority
 * Voting MAY be performed electronically.
 * Voting MAY be performed by show of hands and members announcing their vote verbally one by one, or paper ballots.
 * The result of the vote SHALL be recorded in the meeting minutes.
-* Groups MAY use informal voting to reach consensus. If the Group is still unable to reach consensus, then a formal vote MAY be taken. 
+* Groups MAY use informal voting to reach consensus. If the Group is still unable to reach consensus, then a formal vote MAY be taken.
 * Each member’s electronic vote SHALL be electronically acknowledged to confirm participation in the vote.
 * The voting period for proposals are:
   * In-person-meetings require at least 30 days prior written notice
@@ -160,14 +160,14 @@ The Review & Approval process implies that all the contributions need to be acce
     * During the Review & Approval process members MAY raise **comments** or **objections**.
       * **Comments** MUST be taken in consideration by the Working Group, but they MAY be dismissed if they group thinks that are not relevant.
 
-      * **Objections** MUST be taken in consideration and they cannot be dismissed by the Working Group without being reviewed. 
+      * **Objections** MUST be taken in consideration and they cannot be dismissed by the Working Group without being reviewed.
       * If a contribution receives an **objection** the group MUST resolve the issue, with the person that raise the objection, before deciding the status of the contribution. If the **objection** is sustained, meaning the person doesn’t remove it, then the group will have to recur to a [vote](#voting-on-technical-issues) to resolve it.
 
 * **Approval Criteria**:
     * A contribution is considered **approved** and therefore it can be merged if:
       * The contribution has not received any sustainable **objection** during the review period, AND
       * At least 3 reviewers have indicated that they agree with the contribution
-    * If a sustained **objection** is received, the contribution cannot be merged, even if 3 or more contributors agreed with the contribution. 
+    * If a sustained **objection** is received, the contribution cannot be merged, even if 3 or more contributors agreed with the contribution.
     * If during the review period a contribution receives a **comment**, it is up to the group or maintainer to accept the comment or not. In any case, in order to merge the contribution at least 3 reviewers MUST indicate that they agree with the contribution.
 
 ## [Organization_Abbreviation] Process Flows
@@ -205,7 +205,7 @@ Note: from `[Organization_Abbreviation]` Scope & Governance
 
 4.5. Submissions to Standards Bodies. The Governing Board of the LF Energy Foundation (the “Governing Board”) may submit a Draft Specification or Approved Specification to another standards development organization by vote.  No Draft Specification or Approved Specification may be submitted to another standards development organization without the vote of the Governing Board. Upon an affirmative vote of the Governing Board regarding such a submission, the applicable Maintainer or Maintainers, or any other individuals so directed by the Governing Board, will coordinate the submission of the applicable Draft Specification or Approved Specification to the other standards development organization as directed by the Governing Board. Working Group Participants that developed that Draft Specification or Approved Specification agree to grant the copyright rights necessary to make those submissions.
 
-4.6 Steering Committee.  The Steering Committee is responsible for (a) approval of any Draft Specification as an Approved Specification and (b) alignment among each of the Working Groups of the [Organization_Name] project.  
+4.6 Steering Committee.  The Steering Committee is responsible for (a) approval of any Draft Specification as an Approved Specification and (b) alignment among each of the Working Groups of the [Organization_Name] project.
 
 4.7.  Voting of the Steering Committee and Strategy Committee.  In any vote or Approval before the Steering Committee or Strategy Committee the affirmative vote of at least 50% of the voting members of the Steering Committee or Strategy Committee. The voting members of the Steering Committee and Strategy Committee consist of one appointee from each General Member and each Strategic Member of the LF Energy Foundation of the Linux Foundation.
 ```
@@ -259,7 +259,7 @@ In this section the diagram below depictures the development phases of technical
    <tr>
 	    <td><strong>Ratification</strong></td>
 	    <td>Once the WG approves the document(s), the document(s) are sent to the Steering Committee for   <strong>Ratification</strong>.</td>
-   </tr>   
+   </tr>
    <tr>
 	    <td><strong>Publication | Maintenance</strong></td>
 	    <td>Upon Steering Committee <strong>Ratification</strong>, the document(s) are ready for <strong>Publication</strong>.
@@ -270,7 +270,7 @@ In this section the diagram below depictures the development phases of technical
         <li>The input collected during the <strong>Maintenance</strong> phase SHOULD be used to improve the Technical Specifications as well as to collect business requirements for future releases.</li>
        </ul>
       </td>
-   </tr>   
+   </tr>
   </tbody>
 </table>
 
@@ -280,7 +280,7 @@ In this section the diagram below depictures the development phases of technical
 </figure>
 
 ### GitHub Flows
-It is suggested to follow the principles of [Trunk Based Development](https://trunkbaseddevelopment.com/) whenever is possible. 
+It is suggested to follow the principles of [Trunk Based Development](https://trunkbaseddevelopment.com/) whenever is possible.
 
 <figure>
 	<img src="images/Git-Flow-2.svg" alt="[Organization_Abbreviation] Git Flow">
@@ -404,7 +404,7 @@ This aims to minimize the burden on the contributors and maintainers.
 
 This section provides a recommended format for ease of use, but it is not mandated.
 
-> Note: You may consider discussing with your legal department whether they require you to include a copyright notice identifying the employer as the copyright holder in contributions. Many of LF members' legal departments have already approved the above 
+> Note: You may consider discussing with your legal department whether they require you to include a copyright notice identifying the employer as the copyright holder in contributions. Many of LF members' legal departments have already approved the above
 recommended practice.
 
 #### Reasons to Avoid Listing Copyright Holders
@@ -416,7 +416,7 @@ These are some of the reasons why `[Organization_Abbreviation]` does not recomme
 * Editors and maintainers often do not want to have to worry about e.g. whether a minor contribution (such as a type fix) means that a new copyright notice should be added.
 
 #### Other Copyright Rules
-* If your contribution contains content from a third party source who didn't contribute it themselves, then you should not add the notice above. 
+* If your contribution contains content from a third party source who didn't contribute it themselves, then you should not add the notice above.
 * You should not change or remove someone else's copyright notice unless they have expressly (in writting) permitted you to do so.
 
 ### Licenses
@@ -447,7 +447,7 @@ In addition, it is recommended to include a plain text statement of the license 
 * This project is licensed under the MIT license.
 
 #### License File in the Repository
-Insert in the repository a file called ```License.txt```. 
+Insert in the repository a file called ```License.txt```.
 
 The Maintainer can copy the corresponding license file from the [templates/license]() repository and upload it to the project repository.
 
@@ -497,7 +497,7 @@ This policy is intended to assist `[Organization_Name]` Technical Working Groups
   - It is a good practice to point users to the libraries so they can compile them on their own
   - If the group decides to ship binaries, the binaries should be ONLY for the code developed under the Project License.
   - If there are any other binaries under different license, then each binary should be distributed in its own files. Binaries under a license different than the Project License CANNOT packed with the same binaries than the ones created by the group
-  
+
 ### Technical Document License
 In projects where the main deliverables are technical documents, each document MUST have a legal disclaimer.
 
@@ -506,15 +506,15 @@ The legal disclaimer to insert in each project document SHOULD be:
 ```
 © `[Organization_Abbreviation]` 2022, All rights reserved.
 
-“THESE MATERIALS ARE PROVIDED “AS IS.”  The parties expressly disclaim any warranties 
-(express, implied, or otherwise), including implied warranties of merchantability, non-infringement, 
-fitness for a particular purpose, or title, related to the materials. The entire risk as to 
-implementing or otherwise using the materials is assumed by the implementer and user. 
+“THESE MATERIALS ARE PROVIDED “AS IS.”  The parties expressly disclaim any warranties
+(express, implied, or otherwise), including implied warranties of merchantability, non-infringement,
+fitness for a particular purpose, or title, related to the materials. The entire risk as to
+implementing or otherwise using the materials is assumed by the implementer and user.
 
-IN NO EVENT WILL THE PARTIES BE LIABLE TO ANY OTHER PARTY FOR LOST PROFITS OR ANY FORM OF 
-INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES OF ANY CHARACTER FROM ANY CAUSES 
-OF ACTION OF ANY KIND WITH RESPECT TO THIS DELIVERABLE OR ITS GOVERNING AGREEMENT, WHETHER 
-BASED ON BREACH OF CONTRACT, TORT (INCLUDING NEGLIGENCE), OR OTHERWISE, AND WHETHER OR NOT 
+IN NO EVENT WILL THE PARTIES BE LIABLE TO ANY OTHER PARTY FOR LOST PROFITS OR ANY FORM OF
+INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES OF ANY CHARACTER FROM ANY CAUSES
+OF ACTION OF ANY KIND WITH RESPECT TO THIS DELIVERABLE OR ITS GOVERNING AGREEMENT, WHETHER
+BASED ON BREACH OF CONTRACT, TORT (INCLUDING NEGLIGENCE), OR OTHERWISE, AND WHETHER OR NOT
 THE OTHER MEMBER HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.”
 ```
 
@@ -529,10 +529,10 @@ By making a contribution to this project, I certify that:
 > 1. The contribution is based upon previous work that, to the best of my knowledge, is covered under an appropriate open source license and I have the right under that license to submit that work with modifications, whether created in whole or in part by me, under the same open source license (unless I am permitted to submit under a different license), as indicated in the file; or
 > 1. The contribution was provided directly to me by some other person who certified (1), (2) or (3) and I have not modified it.
 > 1. I understand and agree that this project and the contribution are public and that a record of the contribution (including all personal information I submit with it, including my sign-off) is
-> 2. 
+> 2.
 
 ### Source Code
-Working Group Participants contributing source code to this Working Group agree that those source code contributions are subject to the Developer Certificate of Origin version 1.1, available at http://developercertificate.org/, the license indicated below, and any policies and governance rules included in the source code’s repository. Source code may not be a required element of an Approved Deliverable specification. - [See DCO](https://github.com/OvertureMaps/template-repo/blob/main/dco.md) 
+Working Group Participants contributing source code to this Working Group agree that those source code contributions are subject to the Developer Certificate of Origin version 1.1, available at http://developercertificate.org/, the license indicated below, and any policies and governance rules included in the source code’s repository. Source code may not be a required element of an Approved Deliverable specification. - [See DCO](https://github.com/OvertureMaps/template-repo/blob/main/dco.md)
 
 ### Dataset
 Working Group contributing data to a dataset to this Working Group agree that those data contributions are subject to the license

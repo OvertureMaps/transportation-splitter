@@ -6,21 +6,21 @@ Note: This repository and project are experimental. Things are likely change unt
 
 ## Description
 
-Working with multiple connectors and linearly referenced properties can be difficult. The purpose of this notebook is to offer one option in how Overture transportation features can be consumed, by first splitting them into simpler sub-segments. 
+Working with multiple connectors and linearly referenced properties can be difficult. The purpose of this notebook is to offer one option in how Overture transportation features can be consumed, by first splitting them into simpler sub-segments.
 
 There are multiple ways this can be done, current behavior is to output for each input segment all its corresponding sub-segments "split" at all its connectors and all `between` length-relative location references (LRs).
 
 The result is a transportation data set where segments have exactly two connectors, one for each end, and no linear references.
 
-New "artificial" connector features are added for all LRs that don't already have connectors. 
+New "artificial" connector features are added for all LRs that don't already have connectors.
 
-Result is using same Overture schema as the input, except for segments two columns are added: `start_lr` and `end_lr`. 
+Result is using same Overture schema as the input, except for segments two columns are added: `start_lr` and `end_lr`.
 
-For `sequence` in property `prohibited_transitions` it also adds fields `start_lr` and `end_lr` to identify to which of the splits the `segment_id` refers to. 
+For `sequence` in property `prohibited_transitions` it also adds fields `start_lr` and `end_lr` to identify to which of the splits the `segment_id` refers to.
 
 For details on the process see [here](/ProcessDetails.md).
 
-If you also have access to other open or proprietary data feeds that map Overture segment ids to other properties, with `between` LR fields or not, these can be consolidated into a single parquet via trivial join by `id`, then processed one time by this splitter to produce easy to consume split segments. 
+If you also have access to other open or proprietary data feeds that map Overture segment ids to other properties, with `between` LR fields or not, these can be consolidated into a single parquet via trivial join by `id`, then processed one time by this splitter to produce easy to consume split segments.
 
 ## Getting Started
 
@@ -70,5 +70,3 @@ If you want to customize that behavior please set constants `LR_COLUMNS_TO_INCLU
 
 * 0.1
     * Initial Release
-
-
