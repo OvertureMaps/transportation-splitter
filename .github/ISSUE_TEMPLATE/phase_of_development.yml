@@ -3,7 +3,7 @@ description: Phase development submission
 title: "[Phase-Dev]"
 labels: ["Phase-Dev"]
 projects: ["Add project name"]
-assignees: 
+assignees:
   - <add GitHub username>
 
 body:
@@ -14,7 +14,7 @@ body:
       description: Write your ideas ...
     validations:
       required: false
-  
+
   - type: dropdown
     id: phases
     attributes:
@@ -24,7 +24,7 @@ body:
         - 'phase-1'
         - 'phase-2'
         - 'phase-3'
-        
+
   - type: checkboxes
     id: Platform-work-question
     attributes:

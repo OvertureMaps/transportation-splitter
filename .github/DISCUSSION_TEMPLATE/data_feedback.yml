@@ -35,7 +35,7 @@ body:
       label: feedback-details
       description: "outline in detail what your observations"
       value: |
-        ## Feedback Details: 
+        ## Feedback Details:
         ```
         Add details here
         ```
@@ -73,4 +73,4 @@ body:
   - type: markdown
     attributes:
       value: |
-        ### Thanks for your submission 
+        ### Thanks for your submission

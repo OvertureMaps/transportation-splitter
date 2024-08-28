@@ -209,10 +209,10 @@ policy:
 
           - name: 'phase 2'
             keys: ['phase-2']
-            
+
           - name: 'phase 3'
             keys: ['phase-3']
-   
+
       - id: ['milestone']
         block-list: ['other']
         label:
@@ -220,10 +220,10 @@ policy:
             keys: ['milestone-1']
 
           - name: 'milestone 2'
-            keys: ['milestone-2']     
+            keys: ['milestone-2']
 
           - name: 'milestone 3'
-            keys: ['milestone-3']            
+            keys: ['milestone-3']
 
           - name: 'medium'
             keys: ['medium']
@@ -233,4 +233,3 @@ policy:
 
           - name: 'urgent'
             keys: ['urgent']
-            
