@@ -21,7 +21,7 @@ import json
 import os
 import unittest
 
-SPLIT_AT_CONNECTORS = True
+SPLIT_AT_CONNECTORS = False
 PROHIBITED_TRANSITIONS_COLUMN = "prohibited_transitions"
 DESTINATIONS_COLUMN = "destinations"
 
@@ -29,7 +29,7 @@ DESTINATIONS_COLUMN = "destinations"
 # Explicit list of column names to use for finding LR "between" values to split at. Set to None or empty list to use all columns that have "between" fields.
 LR_COLUMNS_TO_INCLUDE = []
 # list columns to exclude from finding the LR values to split at. Set to None or empty list to use all columns that have "between" fields.
-LR_COLUMNS_TO_EXCLUDE = [] 
+LR_COLUMNS_TO_EXCLUDE = [PROHIBITED_TRANSITIONS_COLUMN] 
 
 LR_SCOPE_KEY = "between"
 POINT_PRECISION = 7
@@ -455,7 +455,7 @@ def get_split_segment_dict(original_segment_dict, original_segment_geometry, ori
             continue
         modified_segment_dict[column] = apply_lr_scope(modified_segment_dict[column], split_segment, original_segment_length)
 
-    if PROHIBITED_TRANSITIONS_COLUMN in lr_columns_for_splitting:
+    if PROHIBITED_TRANSITIONS_COLUMN in modified_segment_dict:
         # remove turn restrictions that we're sure don't apply to this split and construct turn_restrictions field -
         # this is a flat list of all segment_id referenced in sequences;
         # used to resolve segment references after split - for each TR segment_id reference we need to identify which of the splits to retain as reference
@@ -699,13 +699,18 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
         StructField("debug_messages", ArrayType(StringType()), nullable=True),
         StructField("elapsed", DoubleType(), nullable=True),
         StructField("split_segments_rows", ArrayType(split_segment_schema), nullable=True),
-        StructField("added_connectors_rows", ArrayType(transportation_feature_schema), nullable=True)
+        StructField("added_connectors_rows", ArrayType(transportation_feature_schema), nullable=True),
+        StructField("length_before_split", DoubleType(), nullable=True),
+        StructField("length_after_split", DoubleType(), nullable=True),
+        StructField("length_diff", DoubleType(), nullable=True),
     ])
 
     @udf(returnType=return_schema)
     def split_segment(input_segment):
         start = timer()
         debug_messages = []
+        length_before_split = 0.0
+        length_after_split = 0.0
         try:
             lr_columns_for_splitting = broadcast_lr_columns_for_splitting.value
             split_segments_rows = []
@@ -721,11 +726,13 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
                 original_segment_dict.pop(field_to_drop, None)
 
             segment_length = get_length(input_segment.geometry)
+            length_before_split = segment_length
             debug_messages.append(str(input_segment.geometry))
             debug_messages.append(f"length={segment_length}")
 
             split_points = get_connector_split_points(input_segment.joined_connectors, input_segment.geometry, segment_length)
             if not SPLIT_AT_CONNECTORS:
+                split_points = sorted(split_points, key=lambda p: p.lr)
                 split_points = [split_points[0], split_points[-1]]
 
             debug_messages.append("adding lr split points...")
@@ -752,13 +759,16 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
 
             #debug_messages.append("splitting into segments...")
             split_segments = split_line(input_segment.geometry, sorted_split_points)
+            length_after_split = 0.0
             for split_segment in split_segments:
-                debug_messages.append(f"{split_segment.start_split_point.lr}-{split_segment.end_split_point.lr}: " + str(split_segment))
+                split_length = get_length(split_segment.geometry)
+                length_after_split += split_length
+                debug_messages.append(f"{split_segment.start_split_point.lr}-{split_segment.end_split_point.lr} ({split_length}m): " + str(split_segment))
                 if not are_different_coords(list(split_segment.geometry.coords)[0], list(split_segment.geometry.coords)[-1]):
                     error_message += f"Wrong segment created: {split_segment.start_split_point.lr}-{split_segment.end_split_point.lr}: " + str(split_segment.geometry)
                 modified_segment_dict = get_split_segment_dict(original_segment_dict, input_segment.geometry, segment_length, split_segment, lr_columns_for_splitting)
                 split_segments_rows.append(Row(**modified_segment_dict))
-
+            
             for split_point in split_points:
                 if not split_point.is_lr_added:
                     continue
@@ -782,7 +792,8 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
 
         end = timer()
         elapsed = end - start
-        return (is_success, error_message, exception_traceback, debug_messages, elapsed, split_segments_rows, added_connectors_rows)
+        length_diff = length_after_split - length_before_split
+        return (is_success, error_message, exception_traceback, debug_messages, elapsed, split_segments_rows, added_connectors_rows, length_before_split, length_after_split, length_diff)
 
     df_with_struct = df.withColumn("input_segment", struct([col(c) for c in df.columns])).select("id", "input_segment")
     split_segments_df = df_with_struct.withColumn("split_result", split_segment("input_segment"))
@@ -967,7 +978,14 @@ def split_transportation(spark, input_path, output_path, filter_wkt=None, reuse_
     print("split_segments_df")
 
     flat_res_df = split_segments_df.select("input_segment", "split_result.*")
-    print("flat_res_df")
+    
+    print("total length stats")
+    flat_res_df.select(
+        F.sum("length_before_split").cast("int").alias("total_length_before_split"),
+        F.sum("length_after_split").cast("int").alias("total_length_after_split"),
+        F.sum(F.when(F.col("length_diff") < 0, F.col("length_diff")).otherwise(0)).cast("int").alias("length_removed"),
+        F.sum(F.when(F.col("length_diff") > 0, F.col("length_diff")).otherwise(0)).cast("int").alias("length_added")
+    ).show()
 
     if not parquet_exists(spark, segment_splits_exploded_path) or not reuse_existing_intermediate_outputs:
         exploded_df = flat_res_df.withColumn("split_segment_row", F.explode_outer("split_segments_rows")).drop("split_segments_rows")
@@ -988,7 +1006,7 @@ def split_transportation(spark, input_path, output_path, filter_wkt=None, reuse_
     final_segments_df.groupBy("id").agg(count("*").alias("number_of_splits")).groupBy("number_of_splits").agg(count("*")).orderBy("number_of_splits").show()
 
     all_connectors_df = filtered_df.filter("type == 'connector'").unionByName(added_connectors_df).select(filtered_df.columns)
-    if PROHIBITED_TRANSITIONS_COLUMN in lr_columns_for_splitting:
+    if PROHIBITED_TRANSITIONS_COLUMN in final_segments_df.columns:
         final_segments_df = resolve_tr_references(final_segments_df)
 
         # if we're resolving TR refs we need to set the schema with start_lr, end_lr fields for connectors too, so that the union can work:
