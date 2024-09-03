@@ -29,7 +29,7 @@ LR_COLUMNS_TO_INCLUDE = []
 LR_COLUMNS_TO_EXCLUDE = []
 
 LR_SCOPE_KEY = "between"
-POINT_PRECISION = 7
+POINT_PRECISION = 7 
 SPLIT_POINT_THRESHOLD = 0.0037 # New split points are needed for linear references. How far from existing overture connectors do these LRs need to be for us to create a new connector for them instead of using the existing connector.
 class SplitPoint:
     """POCO to represent a segment split point."""
