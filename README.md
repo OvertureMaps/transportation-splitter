@@ -28,14 +28,7 @@ Any Spark environment should work, but for reference this was tested on Databric
 
 ### Dependencies
 
-pip install apache-sedona shapely pyproj
-
-Following packages versions were used:
-```
-apache-sedona = "1.5.1"
-shapely = "2.0.2"
-pyproj = "3.6.1"
-```
+See [requirements.txt](/requirements.txt) for used pip packages.
 
 ### Installing
 
