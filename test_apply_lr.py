@@ -1,5 +1,5 @@
 import unittest
-from TransportationSplitter import *
+from transportation_splitter import *
 
 class TestApplyLR(unittest.TestCase):
     apply_lr_params = [

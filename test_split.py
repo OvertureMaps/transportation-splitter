@@ -1,7 +1,7 @@
 import logging
 import sys
 import unittest
-from TransportationSplitter import *
+from transportation_splitter import *
 
 class TestSplitter(unittest.TestCase):
 
