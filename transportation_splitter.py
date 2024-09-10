@@ -21,7 +21,7 @@ import json
 import os
 import unittest
 
-SPLIT_AT_CONNECTORS = False
+SPLIT_AT_CONNECTORS = True
 PROHIBITED_TRANSITIONS_COLUMN = "prohibited_transitions"
 DESTINATIONS_COLUMN = "destinations"
 
@@ -29,7 +29,7 @@ DESTINATIONS_COLUMN = "destinations"
 # Explicit list of column names to use for finding LR "between" values to split at. Set to None or empty list to use all columns that have "between" fields.
 LR_COLUMNS_TO_INCLUDE = []
 # list columns to exclude from finding the LR values to split at. Set to None or empty list to use all columns that have "between" fields.
-LR_COLUMNS_TO_EXCLUDE = [PROHIBITED_TRANSITIONS_COLUMN] 
+LR_COLUMNS_TO_EXCLUDE = [] 
 
 LR_SCOPE_KEY = "between"
 POINT_PRECISION = 7
