@@ -62,6 +62,8 @@ If you want to customize that behavior please set columns to include or exclude 
 
 If you are using databricks you can also add this repo as a git folder, see instructions [here](https://docs.databricks.com/en/repos/repos-setup.html).
 
+If you are using databricks you can also add this repo as a git folder, see instructions [here](https://docs.databricks.com/en/repos/repos-setup.html).
+
 ## Version History
 
 * 0.1

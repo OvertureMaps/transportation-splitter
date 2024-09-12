@@ -1,7 +1,6 @@
 import logging
 import sys
 import unittest
-
 from shapely import equals
 from transportation_splitter import *
 
