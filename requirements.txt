@@ -1,0 +1,5 @@
+apache-sedona==1.6.0
+numpy<2 # shapely needs numpy version to be < 2
+pyproj==3.6.1
+pyspark==3.5.1
+shapely==2.0.2

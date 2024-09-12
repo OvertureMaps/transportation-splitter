@@ -1,0 +1,27 @@
+name: "Test Splitter"
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: [3.9, 3.11]
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Check Python version
+      run: python --version
+    - name: Upgrade pip
+      run: pip install --upgrade pip
+    - name: Install packages
+      run: pip install -r requirements.txt
+    - name: Run tests
+      run: python -m unittest discover -s . -p "test_*.py" -v
