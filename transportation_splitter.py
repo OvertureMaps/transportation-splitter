@@ -764,7 +764,7 @@ def split_joined_segments(sc, df: DataFrame, lr_columns_for_splitting: list[str]
 
             lrs = sorted(lrs_set)
             debug_messages.append(f"Final LRs set sorted: {lrs}")
-            add_lr_split_points(split_points, lrs, original_segment_dict["id"], input_segment.geometry, segment_length, cfg.split_point_precision, cfg.lr_split_point_min_dist_meters)
+            add_lr_split_points(split_points, lrs, original_segment_dict["id"], input_segment.geometry, segment_length, cfg.point_precision, cfg.lr_split_point_min_dist_meters)
 
             sorted_split_points = sorted(split_points, key=lambda p: p.lr)
             debug_messages.append("sorted final split points:")
