@@ -36,7 +36,7 @@ class TestSplitter(unittest.TestCase):
         ]
 
         input_segment_geometry = wkt.loads(input_segment_wkt)
-        joined_connectors = [Connector(str(index), wkt.loads(point_wkt), index) for index, point_wkt in enumerate(split_points_wkts)]
+        joined_connectors = [JoinedConnector(str(index), wkt.loads(point_wkt), index) for index, point_wkt in enumerate(split_points_wkts)]
         length = get_length(input_segment_geometry)
         split_points = get_connector_split_points(joined_connectors, input_segment_geometry, length)
         sorted_split_points = sorted(split_points, key=lambda p: p.lr)
@@ -66,7 +66,7 @@ class TestSplitter(unittest.TestCase):
     def test_make_split_point(self):
         for expected_lr, connector_geometry, segment_geometry in self.make_split_point_params:
             with self.subTest(expected_lr=expected_lr, connector_geometry=connector_geometry, segment_geometry=segment_geometry):
-                connector = Connector(
+                connector = JoinedConnector(
                     "0",
                     wkt.loads(connector_geometry),
                     0
@@ -360,9 +360,12 @@ class TestSplitter(unittest.TestCase):
                     self.assertFalse(has_consecutive_dupe_coords(actual.geometry), f"Case {case_label}: has consecutive dupe coords")
                     self.assertEqual(wkt.loads(expected), actual.geometry, f"Case {case_label}: incorrect split number #{index}:\nexpected:\n{expected}\nbut got\n{str(actual.geometry)}")
         
+    def find_lr(self, point_geometry, linestring_geometry) -> float:
+        return 0 # TODO: implement or replace all input tests data to have pre-computed lrs
+    
     def split_line(self, segment_wkt:str, split_point_wkts: list[str], lrs: list[float]=[]) -> list[SplitSegment]:
         segment_geometry = wkt.loads(segment_wkt)
-        joined_connectors = [Connector(str(i), wkt.loads(point_wkt), i) for i, point_wkt in enumerate(split_point_wkts)] if split_point_wkts else []
+        joined_connectors = [JoinedConnector(str(i), wkt.loads(point_wkt), i, self.find_lr(wkt.loads(point_wkt), segment_geometry)) for i, point_wkt in enumerate(split_point_wkts)] if split_point_wkts else []
         length = get_length(segment_geometry)
         split_points: list[SplitPoint] = get_connector_split_points(joined_connectors, segment_geometry, length)
         lrs = sorted(set(lrs)) if lrs else []
