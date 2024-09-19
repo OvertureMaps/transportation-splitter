@@ -468,10 +468,10 @@ def get_length_bucket(length):
         return "F. 1km-10km"
     return "G. >10km"
 
-def get_connectors_for_split(split_segment: SplitSegment, original_connectors: list[JoinedConnector]) -> list[Connector]:
+def get_connectors_for_split(split_segment: SplitSegment, original_connectors: list[Connector]) -> list[Connector]:
     connectors_for_split: list[Connector] = [Connector(p.id, p.lr) for p in [split_segment.start_split_point, split_segment.end_split_point]]
-    connectors_for_split += [Connector(c.connector_id, c.connector_at) for c in original_connectors if c.connector_at > split_segment.start_split_point.lr and c.connector_at < split_segment.end_split_point.lr]
-    return sorted(connectors_for_split, lambda p: p.at)
+    connectors_for_split += [c for c in original_connectors if c.at > split_segment.start_split_point.lr and c.at < split_segment.end_split_point.lr]
+    return sorted(connectors_for_split, lambda c: c.at)
 
 def get_split_segment_dict(original_segment_dict, original_segment_geometry, original_segment_length, split_segment, lr_columns_for_splitting, lr_min_overlap_meters):
     modified_segment_dict = original_segment_dict.copy()
