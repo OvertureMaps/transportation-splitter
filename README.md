@@ -58,7 +58,18 @@ spark.sql.extensions org.apache.sedona.viz.sql.SedonaVizExtensions,org.apache.se
 For simplicity all the code and parameters are currently included in one [python script](transportation_splitter.py), please set the input variables with appropriate values for `overture_release_version`, `base_output_path` and optionally `wkt_filter` with a polygon WKT if you want to only process the subset of the Overture data that intersects with it.
 
 The list of columns that are considered for identifying the LRs values to split at is constructed at runtime out of input parquet's schema columns that have a `between` field anywhere in their structure.
-If you want to customize that behavior please set columns to include or exclude in `cfg` parameter `SplitConfig` for details.
+If you want to customize that behavior please set columns to include or exclude in `cfg` parameter `SplitConfig` for details. 
+
+By default the notebook executes the splitting using settings from `DEFAULT_CFG`, which split at all connectors and LR values from all columns in the input, like this:
+```python
+split_transportation(spark, sc, input_path, output_path)
+```
+
+
+This for example first filter data within the given polygon then would split only at the LR values from column `road_flags`, and will not split at connectors:
+```python
+split_transportation(spark, sc, input_path, output_path, wkt_filter="POLYGON(...)", SplitConfig(split_at_connectors=False, lr_columns_to_include=["road_flags"]))
+```
 
 If you are using databricks you can also add this repo as a git folder, see instructions [here](https://docs.databricks.com/en/repos/repos-setup.html).
 
