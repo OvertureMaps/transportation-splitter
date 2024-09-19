@@ -466,10 +466,15 @@ def get_length_bucket(length):
 def get_connector_dict(connector_id:str, lr: float)-> dict:
     return {"connector_id": connector_id, "at": lr}
 
-def get_connectors_for_split(split_segment: SplitSegment, original_connectors: list[dict]) -> list[dict]:
+def get_connectors_for_split(split_segment: SplitSegment, original_connectors: list[dict], original_segment_length:float) -> list[dict]:
     connectors_for_split: list[dict] = [get_connector_dict(p.id, p.lr) for p in [split_segment.start_split_point, split_segment.end_split_point]]
     connectors_for_split += [c for c in original_connectors if c["at"] > split_segment.start_split_point.lr and c["at"] < split_segment.end_split_point.lr]
-    return sorted(connectors_for_split, key=lambda c: c["at"])
+    connectors_for_split = sorted(connectors_for_split, key=lambda c: c["at"])    
+    # now recalculate the "at" location references to be relative to the split
+    for c in connectors_for_split:
+        if c["at"] is not None:
+            c["at"] = (c["at"] * original_segment_length - split_segment.start_split_point.lr_meters) / split_segment.length
+    return connectors_for_split
 
 def get_split_segment_dict(original_segment_dict, original_segment_geometry, original_segment_length, split_segment, lr_columns_for_splitting, lr_min_overlap_meters):
     modified_segment_dict = original_segment_dict.copy()
