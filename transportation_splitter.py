@@ -66,11 +66,6 @@ class SplitConfig(NamedTuple):
 
 DEFAULT_CFG = SplitConfig()
 
-"""Connector structure as expected by overture schema in 'connectors' column"""
-class Connector(NamedTuple):
-    connector_id: str
-    at: float
-
 class JoinedConnector(NamedTuple):
     connector_id: str
     connector_geometry: Point
@@ -376,7 +371,7 @@ def apply_lr_scope(
     else:
         return x
 
-def get_trs(turn_restrictions, connectors: list[Connector]):
+def get_trs(turn_restrictions, connectors: list[dict]):
     # extract TR references structure;
     # this will be used after split is complete to identify for each segment_id reference which of the splits of the original segment_id to use;
     # this step includes pruning out the TRs that don't apply for this split - we check that the TR's first connector id appears in the correct index in connectors corresponding to the TR's heading scope (for forward: index=1, for backward: index=0)
@@ -384,7 +379,7 @@ def get_trs(turn_restrictions, connectors: list[Connector]):
         return None, None
 
     flattened_tr_seq_items = []
-    trs_to_keep = []
+    trs_to_keep: list[dict] = []
     for tr in turn_restrictions:
         tr_heading = (tr.get("when") or {}).get("heading")
         tr_sequence = tr.get("sequence")
@@ -397,11 +392,11 @@ def get_trs(turn_restrictions, connectors: list[Connector]):
 
         first_connector_id_ref = tr_sequence[0].get("connector_id")
 
-        if tr_heading == "forward" and connectors[1].connector_id != first_connector_id_ref:
+        if tr_heading == "forward" and connectors[1]["connector_id"] != first_connector_id_ref:
             # the second connector id on this segment split needs to match the first connector id in the sequence because heading scope applies only to forward
             continue
 
-        if tr_heading == "backward" and connectors[0].connector_id != first_connector_id_ref:
+        if tr_heading == "backward" and connectors[0]["connector_id"] != first_connector_id_ref:
             # the first connector id on this segment split needs to match the first connector id in the sequence because heading scope applies only to backward
             continue
 
@@ -427,13 +422,13 @@ def get_trs(turn_restrictions, connectors: list[Connector]):
 
     return trs_to_keep, flattened_tr_seq_items
 
-def get_destinations(destinations, connectors: list[Connector]):
+def get_destinations(destinations, connectors: list[dict]):
     if destinations is None:
         return None    
     destinations_to_keep = [d for d in destinations if destination_applies_to_split_connectors(d, connectors)]     
     return destinations_to_keep if destinations_to_keep else None
 
-def destination_applies_to_split_connectors(d, connectors: list[Connector]):
+def destination_applies_to_split_connectors(d, connectors: list[dict]):
     if not connectors or len(connectors) != 2:
         # at this point modified segments are expected to have exactly two connector ids, skip edge cases that don't
         return False
@@ -442,10 +437,10 @@ def destination_applies_to_split_connectors(d, connectors: list[Connector]):
     if not from_connector_id or not when_heading:
         #these are required properties and need them to exist to resolve the split reference
         return False
-    if when_heading == "forward" and connectors[1].connector_id != from_connector_id:
+    if when_heading == "forward" and connectors[1]["connector_id"] != from_connector_id:
         # the second connector id on this segment split needs to match the from_connector_id in the destination because heading scope applies only to forward
         return False
-    if when_heading == "backward" and connectors[0].connector_id != from_connector_id:
+    if when_heading == "backward" and connectors[0]["connector_id"] != from_connector_id:
         # the first connector id on this segment split needs to match the from_connector_id in the destination because heading scope applies only to backward
         return False
     if from_connector_id not in connectors:
@@ -468,10 +463,13 @@ def get_length_bucket(length):
         return "F. 1km-10km"
     return "G. >10km"
 
-def get_connectors_for_split(split_segment: SplitSegment, original_connectors: list[Connector]) -> list[Connector]:
-    connectors_for_split: list[Connector] = [Connector(p.id, p.lr) for p in [split_segment.start_split_point, split_segment.end_split_point]]
-    connectors_for_split += [c for c in original_connectors if c.at > split_segment.start_split_point.lr and c.at < split_segment.end_split_point.lr]
-    return sorted(connectors_for_split, lambda c: c.at)
+def get_connector_dict(connector_id:str, lr: float)-> dict:
+    return {"connector_id": connector_id, "at": lr}
+
+def get_connectors_for_split(split_segment: SplitSegment, original_connectors: list[dict]) -> list[dict]:
+    connectors_for_split: list[dict] = [get_connector_dict(p.id, p.lr) for p in [split_segment.start_split_point, split_segment.end_split_point]]
+    connectors_for_split += [c for c in original_connectors if c["at"] > split_segment.start_split_point.lr and c["at"] < split_segment.end_split_point.lr]
+    return sorted(connectors_for_split, key=lambda c: c["at"])
 
 def get_split_segment_dict(original_segment_dict, original_segment_geometry, original_segment_length, split_segment, lr_columns_for_splitting, lr_min_overlap_meters):
     modified_segment_dict = original_segment_dict.copy()
@@ -488,7 +486,7 @@ def get_split_segment_dict(original_segment_dict, original_segment_geometry, ori
     modified_segment_dict["geometry"] = split_segment.geometry
     modified_segment_dict["connectors"] = get_connectors_for_split(split_segment, modified_segment_dict["connectors"])
     if "connector_ids" in modified_segment_dict: # connector_ids are deprecated and scheduled to be removed starting with october release, we can remove this after that
-        modified_segment_dict["connector_ids"] = [c.connector_id for c in modified_segment_dict["connectors"]]
+        modified_segment_dict["connector_ids"] = [c["connector_id"] for c in modified_segment_dict["connectors"]]
     for column in lr_columns_for_splitting:
         if column not in modified_segment_dict or modified_segment_dict[column] is None:
             continue
