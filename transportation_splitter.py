@@ -489,7 +489,7 @@ def get_split_segment_dict(original_segment_dict, original_segment_geometry, ori
     if not split_segment.geometry.is_simple:
         modified_segment_dict["metrics"]["split_self_intersecting"] = "true"    
     modified_segment_dict["geometry"] = split_segment.geometry
-    modified_segment_dict["connectors"] = get_connectors_for_split(split_segment, modified_segment_dict["connectors"])
+    modified_segment_dict["connectors"] = get_connectors_for_split(split_segment, modified_segment_dict["connectors"], original_segment_length)
     if "connector_ids" in modified_segment_dict: # connector_ids are deprecated and scheduled to be removed starting with october release, we can remove this after that
         modified_segment_dict["connector_ids"] = [c["connector_id"] for c in modified_segment_dict["connectors"]]
     for column in lr_columns_for_splitting:
