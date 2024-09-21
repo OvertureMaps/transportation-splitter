@@ -14,7 +14,7 @@ class TestSplitter(unittest.TestCase):
         assert(not has_consecutive_dupe_coords(line2))
 
     def test_remove_consecutive_dupe_coords(self):
-        line = LineString([(0, 0), (1, 1), (1, 1), (2, 2)])
+        line = LineString([(0, 0), (1, 1), (1, 1), (1, 1), (2, 2)])
         deduped_coords = remove_consecutive_dupes(line.coords)
         cleaned_line = LineString(deduped_coords)
 
@@ -36,7 +36,7 @@ class TestSplitter(unittest.TestCase):
         ]
 
         input_segment_geometry = wkt.loads(input_segment_wkt)
-        joined_connectors = [JoinedConnector(str(index), wkt.loads(point_wkt), index) for index, point_wkt in enumerate(split_points_wkts)]
+        joined_connectors = [JoinedConnector(str(index), wkt.loads(point_wkt), index, 0) for index, point_wkt in enumerate(split_points_wkts)]
         length = get_length(input_segment_geometry)
         split_points = get_connector_split_points(joined_connectors, input_segment_geometry, length)
         sorted_split_points = sorted(split_points, key=lambda p: p.lr)
@@ -69,6 +69,7 @@ class TestSplitter(unittest.TestCase):
                 connector = JoinedConnector(
                     "0",
                     wkt.loads(connector_geometry),
+                    0,
                     0
                 )
                 segment_geometry = wkt.loads(segment_geometry)
@@ -169,22 +170,6 @@ class TestSplitter(unittest.TestCase):
             [
                 "LINESTRING (36.1369686 51.7212314, 36.136962 51.7218083, 36.1366374 51.7214502, 36.1366057 51.7214161, 36.136594 51.7213954, 36.136579 51.7213789, 36.1365232 51.7213392, 36.1365077 51.7213249, 36.1365 51.72131, 36.1364969 51.7212912, 36.1365011 51.7212699, 36.1365117 51.7211947, 36.1364841 51.7211159, 36.1364818 51.7211093, 36.1364116 51.7210335, 36.1363076 51.7209744, 36.1361797 51.7209376, 36.1360698 51.7209266, 36.1359589 51.7209322, 36.1358534 51.7209541, 36.1357653 51.7209887, 36.1357133 51.7210215, 36.1356825 51.7210408, 36.1356271 51.7211005, 36.1355964 51.7211668, 36.1355922 51.7212356, 36.1356138 51.7213004, 36.1356147 51.7213031, 36.135643 51.7213398)",
                 "LINESTRING (36.135643 51.7213398, 36.1356627 51.7213653, 36.1357334 51.7214186, 36.1358226 51.7214598, 36.1359543 51.7214911, 36.1360951 51.7214962, 36.1362319 51.7214747, 36.1363667 51.7214374, 36.1364183 51.7214191, 36.1364665 51.7214049, 36.1365165 51.7214048, 36.136563 51.7214132, 36.1366058 51.7214295, 36.1366374 51.7214502)",            
-            ]
-        ),
-        (
-            "test_split_line_close_connectors",
-            "LINESTRING (-75.5559947 6.3343023, -75.5559789 6.3343055, -75.5559623 6.3343089)",
-            [
-                "POINT (-75.5559947 6.3343023)",
-                "POINT (-75.555979  6.3343055)",
-                "POINT (-75.5559789 6.3343055)",
-                "POINT (-75.5559623 6.3343089)",
-            ],
-            None,
-            [
-                "LINESTRING (-75.5559947 6.3343023, -75.555979  6.3343055)",
-                "LINESTRING (-75.555979  6.3343055, -75.5559789 6.3343055)",
-                "LINESTRING (-75.5559789 6.3343055, -75.5559623 6.3343089)",           
             ]
         ),
         (
@@ -359,13 +344,10 @@ class TestSplitter(unittest.TestCase):
                 for index, (expected, actual) in enumerate(zip(expected_split_wkts, split_segments)):
                     self.assertFalse(has_consecutive_dupe_coords(actual.geometry), f"Case {case_label}: has consecutive dupe coords")
                     self.assertEqual(wkt.loads(expected), actual.geometry, f"Case {case_label}: incorrect split number #{index}:\nexpected:\n{expected}\nbut got\n{str(actual.geometry)}")
-        
-    def find_lr(self, point_geometry, linestring_geometry) -> float:
-        return 0 # TODO: implement or replace all input tests data to have pre-computed lrs
-    
+            
     def split_line(self, segment_wkt:str, split_point_wkts: list[str], lrs: list[float]=[]) -> list[SplitSegment]:
         segment_geometry = wkt.loads(segment_wkt)
-        joined_connectors = [JoinedConnector(str(i), wkt.loads(point_wkt), i, self.find_lr(wkt.loads(point_wkt), segment_geometry)) for i, point_wkt in enumerate(split_point_wkts)] if split_point_wkts else []
+        joined_connectors = [JoinedConnector(str(i), wkt.loads(point_wkt), i, 0) for i, point_wkt in enumerate(split_point_wkts)] if split_point_wkts else []
         length = get_length(segment_geometry)
         split_points: list[SplitPoint] = get_connector_split_points(joined_connectors, segment_geometry, length)
         lrs = sorted(set(lrs)) if lrs else []

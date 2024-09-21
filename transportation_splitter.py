@@ -586,6 +586,8 @@ def get_connector_split_points(connectors, original_segment_geometry, original_s
     if not connectors_queue:
         return split_points
         
+    # Get the length of the projected segment
+    geod = pyproj.Geod(ellps="WGS84")
     coord_count = len(original_segment_coords)
     
     # Connector coordinates have exact match in the segment's coordinates.
@@ -595,14 +597,22 @@ def get_connector_split_points(connectors, original_segment_geometry, original_s
     if not are_different_coords(last_connector.connector_geometry.coords[0], original_segment_coords[-1]):
         split_points.append(SplitPoint(last_connector.connector_id, last_connector.connector_geometry, lr=1, lr_meters=original_segment_length, is_lr_added=False, at_coord_idx=coord_count-1))
         connectors_queue.pop()
-
+    
+    lr_meters = 0
     for coord_idx in range(0, coord_count):
         for connector in list(connectors_queue):
             connector_geometry = connector.connector_geometry
             if not are_different_coords(connector_geometry.coords[0], original_segment_coords[coord_idx]):
-                split_points.append(SplitPoint(connector.connector_id, connector_geometry, connector.connector_at, connector.connector_at * original_segment_length, is_lr_added=False, at_coord_idx=coord_idx))
+                lr = lr_meters / original_segment_length
+                split_points.append(SplitPoint(connector.connector_id, connector_geometry, lr, lr_meters, is_lr_added=False, at_coord_idx=coord_idx))
+                #split_points.append(SplitPoint(connector.connector_id, connector_geometry, connector.connector_at, connector.connector_at * original_segment_length, is_lr_added=False, at_coord_idx=coord_idx))
                 connectors_queue.remove(connector)
-    
+
+        if coord_idx < coord_count - 1:
+            sub_segment = LineString([original_segment_coords[coord_idx], original_segment_coords[coord_idx+1]])
+            sub_segment_length = geod.geometry_length(sub_segment)
+            lr_meters += sub_segment_length    
+
     if connectors_queue:
         raise Exception(f"Could not find coordinates of connectors in segment's geometry")
     return split_points
