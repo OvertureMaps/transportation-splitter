@@ -1091,7 +1091,7 @@ if 'spark' in globals():
     output_path = f"{base_output_path}/{overture_release_version}/{filter_target}"
 
     
-    result_df = split_transportation(spark, sc, input_path, output_path, wkt_filter, SplitConfig(split_at_connectors=False))
+    result_df = split_transportation(spark, sc, input_path, output_path, wkt_filter)
     if "DATABRICKS_RUNTIME_VERSION" in os.environ:
         display(result_df.filter('type == "segment"').limit(50))
     else:
