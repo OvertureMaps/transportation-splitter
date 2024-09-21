@@ -22,6 +22,14 @@ import os
 PROHIBITED_TRANSITIONS_COLUMN = "prohibited_transitions"
 DESTINATIONS_COLUMN = "destinations"
 LR_SCOPE_KEY = "between"
+"""
+IS_ON_SUB_SEGMENT_THRESHOLD_METERS 1mm
+This is the max distance from a connector point to a sub-segment for the connector to be 
+considered "on" that sub-segment. It is used for the fallback logic to find connector's 
+place in the segment's coordinates, for dealing with edge cases where the exact connector 
+latlong coordinates are not found on the geometry because of rounding.
+"""
+IS_ON_SUB_SEGMENT_THRESHOLD_METERS = 0.001
 
 class SplitConfig(NamedTuple):
     """
@@ -53,11 +61,6 @@ class SplitConfig(NamedTuple):
     for us to create a new connector for them instead of using the existing connector.
     """
     lr_split_point_min_dist_meters: float = 0.01 # 1cm
-
-    """
-    Max distance from a connector point to a sub-segment for the connector to be considered "on" that sub-segment.
-    """
-    is_on_sub_segment_threshold_meters: float = 0.001 # 1mm
 
     """
     Skips steps for which intermediate streams are found, default True, set to False to always force reprocess all sub-steps 
@@ -612,6 +615,48 @@ def get_connector_split_points(connectors, original_segment_geometry, original_s
             sub_segment = LineString([original_segment_coords[coord_idx], original_segment_coords[coord_idx+1]])
             sub_segment_length = geod.geometry_length(sub_segment)
             lr_meters += sub_segment_length    
+
+    if not connectors_queue:	
+        return split_points	
+
+    # Pass 2 - fallback if some connectors don't match exactly the coordinates, 	
+    # find which consecutive coord pair sub-segment it lies on	
+    coord_idx = 0 	
+    accumulated_segment_length = 0	
+    for (lon1, lat1), (lon2, lat2) in zip(original_segment_coords[:-1], original_segment_coords[1:]):	
+        sub_segment = LineString([(lon1, lat1), (lon2, lat2)])	
+        sub_segment_length = geod.geometry_length(sub_segment)	
+
+        while connectors_queue:	
+            connector = connectors_queue[0]	
+            connector_geometry = connector.connector_geometry	
+
+            # Calculate the distances between points 1 and 2 of the sub-segment and the connector	
+            _, _, dist12 = geod.inv(lon1, lat1, lon2, lat2)	
+            _, _, dist1c = geod.inv(lon1, lat1, connector_geometry.x, connector_geometry.y)	
+            _, _, dist2c = geod.inv(lon2, lat2, connector_geometry.x, connector_geometry.y)            	
+
+            dist_diff = abs(dist1c + dist2c - dist12)	
+            if dist_diff < IS_ON_SUB_SEGMENT_THRESHOLD_METERS:	
+
+                if len(connectors_queue) == 1 and not are_different_coords(connector_geometry.coords[0], original_segment_coords[-1]):	
+                    # edge case first - if this is the last connector, and it matches the last coordinate then LR should be 1,	
+                    # no matter if the same coordinate may also appear here, somewhere else in the middle of the segment	
+                    at_coord_idx = len(original_segment_coords) - 1	
+                    lr_meters = original_segment_length	
+                else:	
+                    offset_on_segment_meters = dist1c	
+                    at_coord_idx = coord_idx + 1 if offset_on_segment_meters == sub_segment_length else coord_idx	
+                    lr_meters = accumulated_segment_length + offset_on_segment_meters	
+
+                lr = lr_meters / original_segment_length	
+                split_points.append(SplitPoint(connector.connector_id, connector_geometry, lr, lr_meters, is_lr_added=False, at_coord_idx=at_coord_idx))	
+                connectors_queue.popleft()	
+            else:	
+                # next connector is not on this segment, move to next segment	
+                break	
+        coord_idx += 1	
+        accumulated_segment_length += sub_segment_length
 
     if connectors_queue:
         raise Exception(f"Could not find coordinates of connectors in segment's geometry")
