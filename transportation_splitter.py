@@ -403,7 +403,7 @@ def get_trs(turn_restrictions, connectors: list[dict]):
             # the first connector id on this segment split needs to match the first connector id in the sequence because heading scope applies only to backward
             continue
 
-        if first_connector_id_ref not in connectors:
+        if not any(first_connector_id_ref == c["connector_id"] for c in connectors):
             # the first connector id in the sequence needs to be in this split's connectors no matter what
             continue
 
@@ -446,7 +446,7 @@ def destination_applies_to_split_connectors(d, connectors: list[dict]):
     if when_heading == "backward" and connectors[0]["connector_id"] != from_connector_id:
         # the first connector id on this segment split needs to match the from_connector_id in the destination because heading scope applies only to backward
         return False
-    if from_connector_id not in connectors:
+    if not any(from_connector_id == c["connector_id"] for c in connectors):
         # the from_connector_id needs to be in this split's connector_ids no matter what
         return False
     return True
