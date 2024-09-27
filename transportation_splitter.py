@@ -471,7 +471,10 @@ def get_connector_dict(connector_id:str, lr: float)-> dict:
 
 def get_connectors_for_split(split_segment: SplitSegment, original_connectors: list[dict], original_segment_length:float) -> list[dict]:
     connectors_for_split: list[dict] = [get_connector_dict(p.id, p.lr) for p in [split_segment.start_split_point, split_segment.end_split_point]]
-    connectors_for_split += [c for c in original_connectors if c["at"] > split_segment.start_split_point.lr and c["at"] < split_segment.end_split_point.lr]
+    connectors_for_split += [c for c in original_connectors if 
+                             c["at"] > split_segment.start_split_point.lr and 
+                             c["at"] < split_segment.end_split_point.lr and 
+                             not any(x["connector_id"]==c["connector_id"] for x in connectors_for_split)]
     connectors_for_split = sorted(connectors_for_split, key=lambda c: c["at"])    
     # now recalculate the "at" location references to be relative to the split
     for c in connectors_for_split:
