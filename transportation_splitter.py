@@ -476,10 +476,10 @@ def get_connectors_for_split(split_segment: SplitSegment, original_connectors: l
                              c["at"] < split_segment.end_split_point.lr and 
                              not any(x["connector_id"]==c["connector_id"] for x in connectors_for_split)]
     connectors_for_split = sorted(connectors_for_split, key=lambda c: c["at"])    
-    # now recalculate the "at" location references to be relative to the split
+    # now recalculate the "at" location references to be relative to the split - round to 9 digits for consistency with overture input data
     for c in connectors_for_split:
         if c["at"] is not None:
-            c["at"] = (c["at"] * original_segment_length - split_segment.start_split_point.lr_meters) / split_segment.length
+            c["at"] = round((c["at"] * original_segment_length - split_segment.start_split_point.lr_meters) / split_segment.length, 9)
     return connectors_for_split
 
 def get_split_segment_dict(original_segment_dict, original_segment_geometry, original_segment_length, split_segment, lr_columns_for_splitting, lr_min_overlap_meters):
