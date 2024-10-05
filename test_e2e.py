@@ -38,8 +38,7 @@ def spark_session(request):
         .config("spark.driver.bindAddress", "127.0.0.1")
         .config(
             "spark.jars.packages",
-            "org.apache.sedona:sedona-spark-shaded-3.0_2.12:1.6.1,"
-            "org.datasyslab:geotools-wrapper:1.6.1-28.2",
+            "org.apache.sedona:sedona-spark-3.0_2.12:1.6.1,org.datasyslab:geotools-wrapper:1.6.1-28.2",
         )
         .getOrCreate()
     )
