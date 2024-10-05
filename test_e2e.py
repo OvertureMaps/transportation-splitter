@@ -1,4 +1,5 @@
 import logging
+from importlib.metadata import version
 
 import pytest
 from pyspark.sql import SparkSession, Row
@@ -31,6 +32,15 @@ def quiet_py4j():
 def spark_session(request):
     """Fixture for creating a spark context."""
 
+    spark_version = version("pyspark")
+    minor_version = int(spark_version.split(".")[1])
+
+    # Sedona recommends using matching major.minor version for spark >= 3.4
+    # See latest instructions here: https://sedona.apache.org/latest/setup/install-python/
+    spark_version_for_sedona = "3.0"
+    if minor_version >= 4:
+        spark_version_for_sedona = f"3.{minor_version}"
+
     spark = (
         SedonaContext.builder()
         .master("local[*]")
@@ -38,7 +48,12 @@ def spark_session(request):
         .config("spark.driver.bindAddress", "127.0.0.1")
         .config(
             "spark.jars.packages",
-            "org.apache.sedona:sedona-spark-3.0_2.12:1.6.1,org.datasyslab:geotools-wrapper:1.6.1-28.2",
+            f"org.apache.sedona:sedona-spark-{spark_version_for_sedona}_2.12:1.6.1,"
+            "org.datasyslab:geotools-wrapper:1.6.1-28.2",
+        )
+        .config(
+            "spark.jars.repositories",
+            "https://artifacts.unidata.ucar.edu/repository/unidata-all",
         )
         .getOrCreate()
     )
@@ -74,8 +89,8 @@ def test_split_no_connector_split(spark_session):
         .collect()
     )
     assert len(actual_df) == 3
-    for split in actual_df:
-        print(split)
+
+    # Check attributes
     assert all(
         [
             split["class"] == "motorway"
@@ -84,8 +99,6 @@ def test_split_no_connector_split(spark_session):
             for split in actual_df
         ]
     )
-
-    # Check attributes
     assert actual_df[0].road_flags == [
         Row(values=["is_bridge", "is_link"], between=None)
     ]
@@ -115,11 +128,17 @@ def test_split_all_connectors(spark_session):
     input_path = "test/data/*.parquet"
     output_path = "test/out/all_connectors"
 
+    test_config = SplitConfig(
+        split_at_connectors=True,
+        reuse_existing_intermediate_outputs=False,
+    )
+
     result_df = split_transportation(
         spark_session,
         spark_session.sparkContext,
         input_path,
         output_path,
+        cfg=test_config,
     )
 
     actual_df = (
@@ -128,8 +147,8 @@ def test_split_all_connectors(spark_session):
         .collect()
     )
     assert len(actual_df) == 4
-    for split in actual_df:
-        print(split)
+
+    # Check attributes
     assert all(
         [
             split["class"] == "motorway"
@@ -138,8 +157,6 @@ def test_split_all_connectors(spark_session):
             for split in actual_df
         ]
     )
-
-    # Check attributes
     assert actual_df[0].road_flags == [
         Row(values=["is_bridge", "is_link"], between=None)
     ]
