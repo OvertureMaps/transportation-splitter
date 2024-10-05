@@ -1,6 +1,7 @@
-Queries to fetch updated data
+Queries below quickly fetch data for this WKT (rather than a slow spatial intersect):
+`POLYGON ((-122.1896338 47.6185118, -122.1895695 47.6124029, -122.1792197 47.6129526, -122.1793771 47.6178368, -122.1896338 47.6185118))`
 
-Connectors:
+Connectors
 ```
 COPY (
     SELECT *
@@ -13,7 +14,7 @@ COPY (
 ) TO 'connector.parquet';
 ```
 
-Segments:
+Segments
 ```
 COPY (
     SELECT *
