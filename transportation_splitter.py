@@ -7,34 +7,73 @@
 # COMMAND ----------
 
 from collections import deque
-from pyspark.sql.functions import expr, lit, col, explode, collect_list, struct, udf, struct, count, when, size, split, element_at, coalesce, round as _round
+from pyspark.sql.functions import expr, lit, col, explode, collect_list, struct, udf, struct, count, size, split, element_at, coalesce, round as _round
 from pyspark.sql.types import *
 from pyspark.sql.utils import AnalysisException
 from pyspark.sql import DataFrame, functions as F
 import pyproj
 from shapely.geometry import Point, LineString
-from shapely import wkt, wkb, ops, equals
+from shapely import wkt
 from timeit import default_timer as timer
 from typing import NamedTuple, Optional, Any
 import traceback
-import json
 import os
-import unittest
 
-SPLIT_AT_CONNECTORS = True
 PROHIBITED_TRANSITIONS_COLUMN = "prohibited_transitions"
 DESTINATIONS_COLUMN = "destinations"
-
-# List of columns that are considered for identifying the LRs values to split at is constructed at runtime out of input parquet's schema columns that have LR_SCOPE_KEY = "between" anywhere in their structure. The include/exclude constants below are applied to that list.
-# Explicit list of column names to use for finding LR "between" values to split at. Set to None or empty list to use all columns that have "between" fields.
-LR_COLUMNS_TO_INCLUDE = []
-# list columns to exclude from finding the LR values to split at. Set to None or empty list to use all columns that have "between" fields.
-LR_COLUMNS_TO_EXCLUDE = [] 
-
 LR_SCOPE_KEY = "between"
-POINT_PRECISION = 7
-LR_SPLIT_POINT_MIN_DIST_METERS = 0.01 # New split points are needed for linear references. How far in meters from other existing splits (from either connectors or other LRs) do these LRs need to be for us to create a new connector for them instead of using the existing connector.
-IS_ON_SUB_SEGMENT_THRESHOLD_METERS = 0.001 # 1mm -> max distance from a connector point to a sub-segment for the connector to be considered "on" that sub-segment
+"""
+IS_ON_SUB_SEGMENT_THRESHOLD_METERS 1mm
+This is the max distance from a connector point to a sub-segment for the connector to be 
+considered "on" that sub-segment. It is used for the fallback logic to find connector's 
+place in the segment's coordinates, for dealing with edge cases where the exact connector 
+latlong coordinates are not found on the geometry because of rounding.
+"""
+IS_ON_SUB_SEGMENT_THRESHOLD_METERS = 0.001
+
+class SplitConfig(NamedTuple):
+    """
+    Controls wether or not to introduce a split on every connector along the segment
+    """
+    split_at_connectors: bool = True
+
+    """
+    Which columns to explicitly include when looking for 'between' LR values to split at.
+    If left emtpy all then columns in the input parquet are considered.
+    If non-empty list is provided, then only those columns are considered.
+    """
+    lr_columns_to_include: list[str] = []
+
+    """
+    Which columns to explicitly exclude when looking for 'between' LR values to split at.
+    Behaves like the include counterpart but negative.
+    """
+    lr_columns_to_exclude: list[str] = []
+
+    """
+    How many digits to round the lat and long for split points.
+    """
+    point_precision: int = 7
+
+    """
+    New split points are needed for linear references. This controls how far in meters from 
+    other existing splits (from either connectors or other LRs) do these LRs need to be 
+    for us to create a new connector for them instead of using the existing connector.
+    """
+    lr_split_point_min_dist_meters: float = 0.01 # 1cm
+
+    """
+    Skips steps for which intermediate streams are found, default True, set to False to always force reprocess all sub-steps 
+    """
+    reuse_existing_intermediate_outputs: bool = True
+
+DEFAULT_CFG = SplitConfig()
+
+class JoinedConnector(NamedTuple):
+    connector_id: str
+    connector_geometry: Point
+    connector_index: int
+    connector_at: float
 
 class SplitPoint:
     """POCO to represent a segment split point."""
@@ -153,16 +192,17 @@ def join_segments_with_connectors(input_df):
         .withColumnRenamed("geometry", "connector_geometry")\
 
     segments_with_index = segments_df.withColumn(
-        "connector_ids_with_index",
-        F.expr("TRANSFORM(connector_ids, (x, i) -> STRUCT(x AS id, i AS index))")
+        "connectors_with_index",
+        F.expr("TRANSFORM(connectors, (c, i) -> STRUCT(c.connector_id AS id, c.at AS at, i AS index))")
     )
     segments_connectors_exploded = segments_with_index.select(
         col("segment_id"),
-        explode("connector_ids_with_index").alias("connector_with_index")
+        explode("connectors_with_index").alias("connector_with_index")
     ).select(
         col("segment_id"),
         col("connector_with_index.id").alias("connector_id"),
-        col("connector_with_index.index").alias("connector_index")
+        col("connector_with_index.at").alias("connector_at"),
+        col("connector_with_index.index").alias("connector_index"),
     )
 
     # Step 2: Join with connectors_df to get connector geometry
@@ -173,6 +213,7 @@ def join_segments_with_connectors(input_df):
     ).select(
         segments_connectors_exploded.segment_id,
         segments_connectors_exploded.connector_id,
+        segments_connectors_exploded.connector_at,
         segments_connectors_exploded.connector_index,
         connectors_df.connector_geometry
     )
@@ -183,6 +224,7 @@ def join_segments_with_connectors(input_df):
             struct(
                 col("connector_id"),
                 col("connector_geometry"),
+                col("connector_at"),
                 col("connector_index")
             )
         ).alias("joined_connectors")
@@ -206,7 +248,7 @@ def remove_consecutive_dupes(coordinates):
 def are_different_coords(coords1, coords2):
     return coords1[0] != coords2[0] or coords1[1] != coords2[1]
 
-def round_point(point, precision=POINT_PRECISION):
+def round_point(point, precision):
     return Point(round(point.x, precision), round(point.y, precision))
 
 def split_line(original_line_geometry: LineString, split_points: list[SplitPoint] ) -> list[SplitSegment]:
@@ -255,23 +297,11 @@ def get_lrs(x):
                     output.append(lr)
     return output
 
-def is_lr_scope_applicable_to_split(between, split_segment: SplitSegment, original_segment_length_meters, tolerance_meters=LR_SPLIT_POINT_MIN_DIST_METERS) -> bool:
-    lr_start_meters = (between[0] if between[0] else 0) * original_segment_length_meters
-    lr_end_meters = (between[1] if between[1] else 1) * original_segment_length_meters
-    return (
-        # either the between LR is completely covered by the split's LR:
-        (lr_start_meters >= split_segment.start_split_point.lr_meters - tolerance_meters and 
-        lr_end_meters <= split_segment.end_split_point.lr_meters + tolerance_meters) or 
-        # OR the between LR completely covers the split's LR:
-        (lr_start_meters <= split_segment.start_split_point.lr_meters + tolerance_meters and 
-        lr_end_meters >= split_segment.end_split_point.lr_meters - tolerance_meters)
-    )
-
 def apply_lr_on_split(
         original_lr: list[float], 
         split_segment: SplitSegment, 
-        original_segment_length, 
-        min_overlapping_length_meters=LR_SPLIT_POINT_MIN_DIST_METERS) -> tuple[bool, Optional[list[float]]]:
+        original_segment_length: float, 
+        min_overlapping_length_meters: float) -> tuple[bool, Optional[list[float]]]:
     split_length = split_segment.length
     lr_start_meters = (original_lr[0] if original_lr[0] else 0) * original_segment_length
     lr_end_meters = (original_lr[1] if original_lr[1] else 1) * original_segment_length
@@ -305,21 +335,21 @@ def apply_lr_scope(
         x: Any, 
         split_segment: SplitSegment, 
         original_segment_length:float, 
-        xpath:str = "$", 
-        min_overlapping_length_meters:float=LR_SPLIT_POINT_MIN_DIST_METERS):
+        min_overlapping_length_meters:float,
+        xpath:str = "$"):
     if x is None:
         return None
 
     #print(f"apply_lr_scope({json.dumps(x)}, {xpath})")
     if isinstance(x, list):
-        output = []
+        output_list = []
         for index, sub_item in enumerate(x):
-            cleaned_sub_item = apply_lr_scope(sub_item, split_segment, original_segment_length, f"{xpath}[{index}]")
+            cleaned_sub_item = apply_lr_scope(sub_item, split_segment, original_segment_length, min_overlapping_length_meters, f"{xpath}[{index}]")
             if cleaned_sub_item is not None:
-                output.append(cleaned_sub_item)
-        return output if output else None
+                output_list.append(cleaned_sub_item)
+        return output_list if output_list else None
     elif isinstance(x, dict):
-        output = {}
+        output_dict = {}
         if LR_SCOPE_KEY in x and x[LR_SCOPE_KEY] is not None:
             original_lr = x[LR_SCOPE_KEY]
             if not isinstance(original_lr, list):
@@ -331,50 +361,50 @@ def apply_lr_scope(
             if not is_applicable:
                 return None
             if new_lr:
-                output[LR_SCOPE_KEY] = new_lr
+                output_dict[LR_SCOPE_KEY] = new_lr
 
         for key in x.keys():
             if key == LR_SCOPE_KEY:
                 continue
-            clean_sub_prop = apply_lr_scope(x[key], split_segment, original_segment_length, f"{xpath}.{key}")
+            clean_sub_prop = apply_lr_scope(x[key], split_segment, original_segment_length, min_overlapping_length_meters, f"{xpath}.{key}")
             if clean_sub_prop is not None:
-                output[key] = clean_sub_prop
+                output_dict[key] = clean_sub_prop
 
-        return output if output else None
+        return output_dict if output_dict else None
     else:
         return x
 
-def get_trs(turn_restrictions, connector_ids):
+def get_trs(turn_restrictions, connectors: list[dict]):
     # extract TR references structure;
     # this will be used after split is complete to identify for each segment_id reference which of the splits of the original segment_id to use;
-    # this step includes pruning out the TRs that don't apply for this split - we check that the TR's first connector id appears in the correct index in connector_ids corresponding to the TR's heading scope (for forward: index=1, for backward: index=0)
+    # this step includes pruning out the TRs that don't apply for this split - we check that the TR's first connector id appears in the correct index in connectors corresponding to the TR's heading scope (for forward: index=1, for backward: index=0)
     if turn_restrictions is None:
         return None, None
 
     flattened_tr_seq_items = []
-    trs_to_keep = []
+    trs_to_keep: list[dict] = []
     for tr in turn_restrictions:
         tr_heading = (tr.get("when") or {}).get("heading")
         tr_sequence = tr.get("sequence")
         if not tr_sequence or len(tr_sequence) == 0:
             continue
 
-        if not connector_ids or len(connector_ids) != 2:
+        if not connectors or len(connectors) != 2:
             # at this point modified segments are expected to have exactly two connector ids, skip edge cases that don't
             continue
 
         first_connector_id_ref = tr_sequence[0].get("connector_id")
 
-        if tr_heading == "forward" and connector_ids[1] != first_connector_id_ref:
+        if tr_heading == "forward" and connectors[1]["connector_id"] != first_connector_id_ref:
             # the second connector id on this segment split needs to match the first connector id in the sequence because heading scope applies only to forward
             continue
 
-        if tr_heading == "backward" and connector_ids[0] != first_connector_id_ref:
+        if tr_heading == "backward" and connectors[0]["connector_id"] != first_connector_id_ref:
             # the first connector id on this segment split needs to match the first connector id in the sequence because heading scope applies only to backward
             continue
 
-        if first_connector_id_ref not in connector_ids:
-            # the first connector id in the sequence needs to be in this split's connector_ids no matter what
+        if not any(first_connector_id_ref == c["connector_id"] for c in connectors):
+            # the first connector id in the sequence needs to be in this split's connectors no matter what
             continue
 
         tr_idx = len(trs_to_keep)
@@ -395,14 +425,14 @@ def get_trs(turn_restrictions, connector_ids):
 
     return trs_to_keep, flattened_tr_seq_items
 
-def get_destinations(destinations, connector_ids):
+def get_destinations(destinations, connectors: list[dict]):
     if destinations is None:
         return None    
-    destinations_to_keep = [d for d in destinations if destination_applies_to_split_connectors(d, connector_ids)]     
+    destinations_to_keep = [d for d in destinations if destination_applies_to_split_connectors(d, connectors)]     
     return destinations_to_keep if destinations_to_keep else None
 
-def destination_applies_to_split_connectors(d, connector_ids):
-    if not connector_ids or len(connector_ids) != 2:
+def destination_applies_to_split_connectors(d, connectors: list[dict]):
+    if not connectors or len(connectors) != 2:
         # at this point modified segments are expected to have exactly two connector ids, skip edge cases that don't
         return False
     when_heading = d.get("when", {}).get("heading")
@@ -410,13 +440,13 @@ def destination_applies_to_split_connectors(d, connector_ids):
     if not from_connector_id or not when_heading:
         #these are required properties and need them to exist to resolve the split reference
         return False
-    if when_heading == "forward" and connector_ids[1] != from_connector_id:
+    if when_heading == "forward" and connectors[1]["connector_id"] != from_connector_id:
         # the second connector id on this segment split needs to match the from_connector_id in the destination because heading scope applies only to forward
         return False
-    if when_heading == "backward" and connector_ids[0] != from_connector_id:
+    if when_heading == "backward" and connectors[0]["connector_id"] != from_connector_id:
         # the first connector id on this segment split needs to match the from_connector_id in the destination because heading scope applies only to backward
         return False
-    if from_connector_id not in connector_ids:
+    if not any(from_connector_id == c["connector_id"] for c in connectors):
         # the from_connector_id needs to be in this split's connector_ids no matter what
         return False
     return True
@@ -436,7 +466,23 @@ def get_length_bucket(length):
         return "F. 1km-10km"
     return "G. >10km"
 
-def get_split_segment_dict(original_segment_dict, original_segment_geometry, original_segment_length, split_segment, lr_columns_for_splitting):
+def get_connector_dict(connector_id:str, lr: float)-> dict:
+    return {"connector_id": connector_id, "at": lr}
+
+def get_connectors_for_split(split_segment: SplitSegment, original_connectors: list[dict], original_segment_length:float) -> list[dict]:
+    connectors_for_split: list[dict] = [get_connector_dict(p.id, p.lr) for p in [split_segment.start_split_point, split_segment.end_split_point]]
+    connectors_for_split += [c for c in original_connectors if 
+                             c["at"] > split_segment.start_split_point.lr and 
+                             c["at"] < split_segment.end_split_point.lr and 
+                             not any(x["connector_id"]==c["connector_id"] for x in connectors_for_split)]
+    connectors_for_split = sorted(connectors_for_split, key=lambda c: c["at"])    
+    # now recalculate the "at" location references to be relative to the split - round to 9 digits for consistency with overture input data
+    for c in connectors_for_split:
+        if c["at"] is not None:
+            c["at"] = round((c["at"] * original_segment_length - split_segment.start_split_point.lr_meters) / split_segment.length, 9)
+    return connectors_for_split
+
+def get_split_segment_dict(original_segment_dict, original_segment_geometry, original_segment_length, split_segment, lr_columns_for_splitting, lr_min_overlap_meters):
     modified_segment_dict = original_segment_dict.copy()
     #debug_messages.append("type(start_lr)=" + str(type(split_segment.start_split_point.lr)))
     #debug_messages.append("type(geometry)=" + str(type(wkb.dumps(split_segment.geometry))))
@@ -449,33 +495,34 @@ def get_split_segment_dict(original_segment_dict, original_segment_geometry, ori
     if not split_segment.geometry.is_simple:
         modified_segment_dict["metrics"]["split_self_intersecting"] = "true"    
     modified_segment_dict["geometry"] = split_segment.geometry
-    modified_segment_dict["connector_ids"] = [split_segment.start_split_point.id, split_segment.end_split_point.id]
+    modified_segment_dict["connectors"] = get_connectors_for_split(split_segment, modified_segment_dict["connectors"], original_segment_length)
+    if "connector_ids" in modified_segment_dict: # connector_ids are deprecated and scheduled to be removed starting with october release, we can remove this after that
+        modified_segment_dict["connector_ids"] = [c["connector_id"] for c in modified_segment_dict["connectors"]]
     for column in lr_columns_for_splitting:
         if column not in modified_segment_dict or modified_segment_dict[column] is None:
             continue
-        modified_segment_dict[column] = apply_lr_scope(modified_segment_dict[column], split_segment, original_segment_length)
+        modified_segment_dict[column] = apply_lr_scope(modified_segment_dict[column], split_segment, original_segment_length, lr_min_overlap_meters)
 
     if PROHIBITED_TRANSITIONS_COLUMN in modified_segment_dict:
         # remove turn restrictions that we're sure don't apply to this split and construct turn_restrictions field -
         # this is a flat list of all segment_id referenced in sequences;
         # used to resolve segment references after split - for each TR segment_id reference we need to identify which of the splits to retain as reference
         prohibited_transitions = modified_segment_dict.get(PROHIBITED_TRANSITIONS_COLUMN) or {}
-        modified_segment_dict[PROHIBITED_TRANSITIONS_COLUMN], modified_segment_dict["turn_restrictions"] = get_trs(prohibited_transitions, modified_segment_dict["connector_ids"])
+        modified_segment_dict[PROHIBITED_TRANSITIONS_COLUMN], modified_segment_dict["turn_restrictions"] = get_trs(prohibited_transitions, modified_segment_dict["connectors"])
 
     if DESTINATIONS_COLUMN in original_segment_dict:
         destinations = modified_segment_dict.get(DESTINATIONS_COLUMN)
-        modified_segment_dict[DESTINATIONS_COLUMN] = get_destinations(destinations, modified_segment_dict["connector_ids"])
+        modified_segment_dict[DESTINATIONS_COLUMN] = get_destinations(destinations, modified_segment_dict["connectors"])
 
     return modified_segment_dict
-
-def is_distinct_split_lr(lr1, lr2, segment_length, min_dist_meters=LR_SPLIT_POINT_MIN_DIST_METERS):
-    return abs(lr1 - lr2) * segment_length > min_dist_meters
 
 def get_length(line_geometry: LineString):
     geod = pyproj.Geod(ellps="WGS84")
     return geod.geometry_length(line_geometry)
 
-def add_lr_split_points(split_points, lrs, segment_id, original_segment_geometry, line_length):
+def add_lr_split_points(split_points, lrs, segment_id, original_segment_geometry, line_length, 
+                        split_point_precision=DEFAULT_CFG.point_precision, 
+                        min_dist_meters=DEFAULT_CFG.lr_split_point_min_dist_meters):
     """
     Split a line at linear reference points along its length
 
@@ -504,7 +551,7 @@ def add_lr_split_points(split_points, lrs, segment_id, original_segment_geometry
             add_split_point = True
         else:
             closest_existing_split_point = min(split_points, key=lambda existing: abs(lr - existing.lr))
-            if is_distinct_split_lr(closest_existing_split_point.lr, lr, line_length):
+            if abs(closest_existing_split_point.lr - lr) * line_length > min_dist_meters:
                 add_split_point = True
 
         if add_split_point:
@@ -522,14 +569,14 @@ def add_lr_split_points(split_points, lrs, segment_id, original_segment_geometry
             # with the azimuth to get the final point
             split_lon, split_lat, _ = geod.fwd(lon1, lat1, azimuth, target_length, return_back_azimuth=False)
 
-            point_geometry = round_point(Point(split_lon, split_lat))
+            point_geometry = round_point(Point(split_lon, split_lat), split_point_precision)
             # see if after rounding we have a point identical to last one;
             # if yes, then don't add a new split point; if we did, we would end up with invalid lines 
             # that start and end in the same point, or, more accurately,  because we have a step that 
             # removes consecutive identical coordinates from splits, it would result in a line with a 
             # single point, which would be invalid.
             # this effectively is an additional tollerance on top of LR_SPLIT_POINT_MIN_DIST_METERS,
-            # which is controlled by the rouding parameter POINT_PRECISION, default value=7, which is ~centimeter size
+            # which is controlled by the rounding parameter split_point_precision, default value=7, which is ~centimeter size
             if not split_points or are_different_coords(split_points[-1].geometry.coords[0], point_geometry.coords[0]):
                 split_points.append(SplitPoint(f"{segment_id}@{str(lr)}", point_geometry, lr, lr_meters=lr * line_length, is_lr_added=True, at_coord_idx=coord_idx))
     return split_points
@@ -539,24 +586,24 @@ def get_connector_split_points(connectors, original_segment_geometry, original_s
     if not connectors:
         return split_points
 
-    # Get the length of the projected segment
-    geod = pyproj.Geod(ellps="WGS84")
     original_segment_coords = list(original_segment_geometry.coords)
     sorted_valid_connectors = sorted([c for c in connectors if c.connector_geometry], key=lambda p: p.connector_index)
     connectors_queue = deque(sorted_valid_connectors)
     if not connectors_queue:
         return split_points
         
-    # Pass 1 - connector coordinates have exact match in the segment's coordinates
+    # Get the length of the projected segment
+    geod = pyproj.Geod(ellps="WGS84")
     coord_count = len(original_segment_coords)
     
-    # edge case first - if last connector matches the last coordinate then LR should be 1,
+    # Connector coordinates have exact match in the segment's coordinates.
+    # Edge case first - if last connector matches the last coordinate then LR should be 1,
     # no matter if the same coordinate may also appear somewhere else in the middle of the segment
     last_connector = connectors_queue[-1]
     if not are_different_coords(last_connector.connector_geometry.coords[0], original_segment_coords[-1]):
         split_points.append(SplitPoint(last_connector.connector_id, last_connector.connector_geometry, lr=1, lr_meters=original_segment_length, is_lr_added=False, at_coord_idx=coord_count-1))
         connectors_queue.pop()
-
+    
     lr_meters = 0
     for coord_idx in range(0, coord_count):
         for connector in list(connectors_queue):
@@ -564,56 +611,58 @@ def get_connector_split_points(connectors, original_segment_geometry, original_s
             if not are_different_coords(connector_geometry.coords[0], original_segment_coords[coord_idx]):
                 lr = lr_meters / original_segment_length
                 split_points.append(SplitPoint(connector.connector_id, connector_geometry, lr, lr_meters, is_lr_added=False, at_coord_idx=coord_idx))
+                #split_points.append(SplitPoint(connector.connector_id, connector_geometry, connector.connector_at, connector.connector_at * original_segment_length, is_lr_added=False, at_coord_idx=coord_idx))
                 connectors_queue.remove(connector)
+
         if coord_idx < coord_count - 1:
             sub_segment = LineString([original_segment_coords[coord_idx], original_segment_coords[coord_idx+1]])
             sub_segment_length = geod.geometry_length(sub_segment)
-            lr_meters += sub_segment_length
-    
-    if not connectors_queue:
-        return split_points
+            lr_meters += sub_segment_length    
 
-    # Pass 2 - fallback if some connectors don't match exactly the coordinates, 
-    # find which consecutive coord pair sub-segment it lies on
-    coord_idx = 0 
-    accumulated_segment_length = 0
-    for (lon1, lat1), (lon2, lat2) in zip(original_segment_coords[:-1], original_segment_coords[1:]):
-        sub_segment = LineString([(lon1, lat1), (lon2, lat2)])
-        sub_segment_length = geod.geometry_length(sub_segment)
-        
-        while connectors_queue:
-            connector = connectors_queue[0]
-            connector_geometry = connector.connector_geometry
+    if not connectors_queue:	
+        return split_points	
 
-            # Calculate the distances between points 1 and 2 of the sub-segment and the connector
-            _, _, dist12 = geod.inv(lon1, lat1, lon2, lat2)
-            _, _, dist1c = geod.inv(lon1, lat1, connector_geometry.x, connector_geometry.y)
-            _, _, dist2c = geod.inv(lon2, lat2, connector_geometry.x, connector_geometry.y)            
-                    
-            dist_diff = abs(dist1c + dist2c - dist12)
-            if dist_diff < IS_ON_SUB_SEGMENT_THRESHOLD_METERS:
+    # Pass 2 - fallback if some connectors don't match exactly the coordinates, 	
+    # find which consecutive coord pair sub-segment it lies on	
+    coord_idx = 0 	
+    accumulated_segment_length = 0	
+    for (lon1, lat1), (lon2, lat2) in zip(original_segment_coords[:-1], original_segment_coords[1:]):	
+        sub_segment = LineString([(lon1, lat1), (lon2, lat2)])	
+        sub_segment_length = geod.geometry_length(sub_segment)	
 
-                if len(connectors_queue) == 1 and not are_different_coords(connector_geometry.coords[0], original_segment_coords[-1]):
-                    # edge case first - if this is the last connector, and it matches the last coordinate then LR should be 1,
-                    # no matter if the same coordinate may also appear here, somewhere else in the middle of the segment
-                    at_coord_idx = len(original_segment_coords) - 1
-                    lr_meters = original_segment_length
-                else:
-                    offset_on_segment_meters = dist1c
-                    at_coord_idx = coord_idx + 1 if offset_on_segment_meters == sub_segment_length else coord_idx
-                    lr_meters = accumulated_segment_length + offset_on_segment_meters
+        while connectors_queue:	
+            connector = connectors_queue[0]	
+            connector_geometry = connector.connector_geometry	
 
-                lr = lr_meters / original_segment_length
-                split_points.append(SplitPoint(connector.connector_id, connector_geometry, lr, lr_meters, is_lr_added=False, at_coord_idx=at_coord_idx))
-                connectors_queue.popleft()
-            else:
-                # next connector is not on this segment, move to next segment
-                break
-        coord_idx += 1
+            # Calculate the distances between points 1 and 2 of the sub-segment and the connector	
+            _, _, dist12 = geod.inv(lon1, lat1, lon2, lat2)	
+            _, _, dist1c = geod.inv(lon1, lat1, connector_geometry.x, connector_geometry.y)	
+            _, _, dist2c = geod.inv(lon2, lat2, connector_geometry.x, connector_geometry.y)            	
+
+            dist_diff = abs(dist1c + dist2c - dist12)	
+            if dist_diff < IS_ON_SUB_SEGMENT_THRESHOLD_METERS:	
+
+                if len(connectors_queue) == 1 and not are_different_coords(connector_geometry.coords[0], original_segment_coords[-1]):	
+                    # edge case first - if this is the last connector, and it matches the last coordinate then LR should be 1,	
+                    # no matter if the same coordinate may also appear here, somewhere else in the middle of the segment	
+                    at_coord_idx = len(original_segment_coords) - 1	
+                    lr_meters = original_segment_length	
+                else:	
+                    offset_on_segment_meters = dist1c	
+                    at_coord_idx = coord_idx + 1 if offset_on_segment_meters == sub_segment_length else coord_idx	
+                    lr_meters = accumulated_segment_length + offset_on_segment_meters	
+
+                lr = lr_meters / original_segment_length	
+                split_points.append(SplitPoint(connector.connector_id, connector_geometry, lr, lr_meters, is_lr_added=False, at_coord_idx=at_coord_idx))	
+                connectors_queue.popleft()	
+            else:	
+                # next connector is not on this segment, move to next segment	
+                break	
+        coord_idx += 1	
         accumulated_segment_length += sub_segment_length
 
     if connectors_queue:
-        raise Exception(f"Could not find split point locations for all connectors")
+        raise Exception(f"Could not find coordinates of connectors in segment's geometry")
     return split_points
 
 additional_fields_in_split_segments = [
@@ -681,7 +730,7 @@ resolved_destinations_schema = ArrayType(
         StructField('final_heading', StringType(), True)
         ]), False)
 
-def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) -> DataFrame:
+def split_joined_segments(sc, df: DataFrame, lr_columns_for_splitting: list[str], cfg: SplitConfig) -> DataFrame:
     broadcast_lr_columns_for_splitting = sc.broadcast(lr_columns_for_splitting)    
     input_fields_to_drop_in_splits = ["joined_connectors"]
     transportation_feature_schema = StructType([field for field in df.schema.fields if field.name not in input_fields_to_drop_in_splits])
@@ -731,7 +780,7 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
             debug_messages.append(f"length={segment_length}")
 
             split_points = get_connector_split_points(input_segment.joined_connectors, input_segment.geometry, segment_length)
-            if not SPLIT_AT_CONNECTORS:
+            if not cfg.split_at_connectors:
                 split_points = sorted(split_points, key=lambda p: p.lr)
                 split_points = [split_points[0], split_points[-1]]
 
@@ -747,7 +796,7 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
 
             lrs = sorted(lrs_set)
             debug_messages.append(f"Final LRs set sorted: {lrs}")
-            add_lr_split_points(split_points, lrs, original_segment_dict["id"], input_segment.geometry, segment_length)
+            add_lr_split_points(split_points, lrs, original_segment_dict["id"], input_segment.geometry, segment_length, cfg.point_precision, cfg.lr_split_point_min_dist_meters)
 
             sorted_split_points = sorted(split_points, key=lambda p: p.lr)
             debug_messages.append("sorted final split points:")
@@ -766,7 +815,7 @@ def split_joined_segments(df: DataFrame, lr_columns_for_splitting: list[str]) ->
                 debug_messages.append(f"{split_segment.start_split_point.lr}-{split_segment.end_split_point.lr} ({split_length}m): " + str(split_segment))
                 if not are_different_coords(list(split_segment.geometry.coords)[0], list(split_segment.geometry.coords)[-1]):
                     error_message += f"Wrong segment created: {split_segment.start_split_point.lr}-{split_segment.end_split_point.lr}: " + str(split_segment.geometry)
-                modified_segment_dict = get_split_segment_dict(original_segment_dict, input_segment.geometry, segment_length, split_segment, lr_columns_for_splitting)
+                modified_segment_dict = get_split_segment_dict(original_segment_dict, input_segment.geometry, segment_length, split_segment, lr_columns_for_splitting, cfg.lr_split_point_min_dist_meters)
                 split_segments_rows.append(Row(**modified_segment_dict))
             
             for split_point in split_points:
@@ -808,10 +857,7 @@ def resolve_tr_references(result_df):
     referenced_splits_info_df = referenced_segment_ids_df.join(
         result_df,
         result_df.id == referenced_segment_ids_df.referenced_segment_id,
-        "inner").select(col("id").alias("ref_id"), col("start_lr").alias("ref_start_lr"), col("end_lr").alias("ref_end_lr"), col("connector_ids").alias("ref_connector_ids"))
-
-    # alternative: just do the select relevant columns on the full corpus then do the inner join
-    #referenced_splits_info_df = result_df.select(col("id").alias("ref_id"), col("start_lr").alias("ref_start_lr"), col("end_lr").alias("ref_end_lr"), col("connector_ids").alias("ref_connector_ids"))
+        "inner").select(col("id").alias("ref_id"), col("start_lr").alias("ref_start_lr"), col("end_lr").alias("ref_end_lr"), col("connectors").alias("ref_connectors"))
 
     ref_joined_df = splits_w_trs_df.join(
         referenced_splits_info_df,
@@ -827,11 +873,10 @@ def resolve_tr_references(result_df):
     referenced_split_condition = F.when(
         F.col("next_connector_id").isNull(),
         F.when(F.col("final_heading") == "forward",
-            F.col("ref_connector_ids")[0] == F.col("connector_id")).otherwise(
-            F.col("ref_connector_ids")[1] == F.col("connector_id"))
+            F.expr("ref_connectors[0].connector_id=connector_id")).otherwise(
+            F.expr("ref_connectors[1].connector_id=connector_id"))
     ).otherwise(
-        F.array_contains(F.col("ref_connector_ids"), F.col("connector_id")) &
-        F.array_contains(F.col("ref_connector_ids"), F.col("next_connector_id"))
+        F.expr("exists(ref_connectors, x -> x.connector_id = connector_id) and exists(ref_connectors, x -> x.connector_id = next_connector_id)")
     )
 
     trs_refs_resolved_df = ref_joined_df.filter(referenced_split_condition).select(
@@ -878,7 +923,7 @@ def resolve_destinations_references(result_df):
     referenced_splits_info_df = referenced_segment_ids_df.join(
         result_df,
         result_df.id == referenced_segment_ids_df.referenced_segment_id,
-        "inner").select(col("id").alias("ref_id"), col("start_lr").alias("to_segment_start_lr"), col("end_lr").alias("to_segment_end_lr"), col("connector_ids").alias("ref_connector_ids"))
+        "inner").select(col("id").alias("ref_id"), col("start_lr").alias("to_segment_start_lr"), col("end_lr").alias("to_segment_end_lr"), col("connectors").alias("ref_connectors"))
 
     ref_joined_df = splits_w_destinations_df.join(
         referenced_splits_info_df,
@@ -890,8 +935,8 @@ def resolve_destinations_references(result_df):
     ).drop("segment_id")
 
     referenced_split_condition = F.when(F.col("final_heading") == "forward",
-        F.col("ref_connector_ids")[0] == F.col("to_connector_id")).otherwise(
-        F.col("ref_connector_ids")[1] == F.col("to_connector_id"))
+        F.expr("ref_connectors[0].connector_id=to_connector_id")).otherwise(
+        F.expr("ref_connectors[1].connector_id=to_connector_id"))
 
     destination_refs_resolved_df = ref_joined_df.filter(referenced_split_condition).select(
         col("id").alias("from_id"),
@@ -916,7 +961,7 @@ def get_aggregated_metrics(result_df):
     metrics_df = metrics_df.withColumn("percentage", _round((col("value_count") / total_row_count) * 100, 2))
     return metrics_df.orderBy('key', 'value')
 
-def split_transportation(spark, input_path, output_path, filter_wkt=None, reuse_existing_intermediate_outputs=True):
+def split_transportation(spark, sc, input_path, output_path, filter_wkt=None, cfg:SplitConfig = DEFAULT_CFG):
     output_path = output_path.rstrip('/')
     print(f"filter_wkt: {filter_wkt}")
     print(f"input_path: {input_path}")
@@ -936,7 +981,7 @@ def split_transportation(spark, input_path, output_path, filter_wkt=None, reuse_
         filtered_df = read_geoparquet(spark, input_path)
     else:
         # Step 1 Filter only features that intersect with given polygon wkt
-        if not parquet_exists(spark, spatially_filtered_path) or not reuse_existing_intermediate_outputs:
+        if not parquet_exists(spark, spatially_filtered_path) or not cfg.reuse_existing_intermediate_outputs:
             input_df = read_geoparquet(spark, input_path)
             print(f"input_df.count() = {str(input_df.count())}")
             print(f"filter_df()...")
@@ -947,12 +992,12 @@ def split_transportation(spark, input_path, output_path, filter_wkt=None, reuse_
 
     print(f"filtered_df.count() = {str(filtered_df.count())}")
 
-    lr_columns_for_splitting = get_filtered_columns(get_columns_with_struct_field_name(filtered_df, LR_SCOPE_KEY), LR_COLUMNS_TO_INCLUDE, LR_COLUMNS_TO_EXCLUDE)
+    lr_columns_for_splitting = get_filtered_columns(get_columns_with_struct_field_name(filtered_df, LR_SCOPE_KEY), cfg.lr_columns_to_include, cfg.lr_columns_to_exclude)
     print("lr_columns_for_splitting: ")
     print(lr_columns_for_splitting)
 
     # Step 2 Join connector geometries with segments
-    if not parquet_exists(spark, joined_path) or not reuse_existing_intermediate_outputs:
+    if not parquet_exists(spark, joined_path) or not cfg.reuse_existing_intermediate_outputs:
         print(f"join_segments_with_connectors()...")
         joined_df = join_segments_with_connectors(filtered_df)
         write_geoparquet(joined_df, joined_path)
@@ -962,9 +1007,9 @@ def split_transportation(spark, input_path, output_path, filter_wkt=None, reuse_
     print(f"joined_df.count() = {str(joined_df.count())}")
 
     # Step 3 Split segments applying UDF on each segment+its connectors
-    if not parquet_exists(spark, raw_split_path) or not reuse_existing_intermediate_outputs:
+    if not parquet_exists(spark, raw_split_path) or not cfg.reuse_existing_intermediate_outputs:
         print(f"split_joined_segments()...")
-        split_segments_df = split_joined_segments(joined_df, lr_columns_for_splitting)        
+        split_segments_df = split_joined_segments(sc, joined_df, lr_columns_for_splitting, cfg)
         split_segments_df.write.format("parquet").mode("overwrite") \
                 .option("compression", "zstd") \
                 .option("parquet.block.size", 16 * 1024 * 1024) \
@@ -987,7 +1032,7 @@ def split_transportation(spark, input_path, output_path, filter_wkt=None, reuse_
         F.sum(F.when(F.col("length_diff") > 0, F.col("length_diff")).otherwise(0)).cast("int").alias("length_added")
     ).show()
 
-    if not parquet_exists(spark, segment_splits_exploded_path) or not reuse_existing_intermediate_outputs:
+    if not parquet_exists(spark, segment_splits_exploded_path) or not cfg.reuse_existing_intermediate_outputs:
         exploded_df = flat_res_df.withColumn("split_segment_row", F.explode_outer("split_segments_rows")).drop("split_segments_rows")
         print("exploded_df")
 
@@ -1030,30 +1075,26 @@ def split_transportation(spark, input_path, output_path, filter_wkt=None, reuse_
         
     return loaded_final_df
 
-class Connector(NamedTuple):
-    connector_id: str
-    connector_geometry: Point
-    connector_index: int
-
 # COMMAND ----------
 if 'spark' in globals():
-    overture_release_version = "2024-07-22.0"
+    overture_release_version = "2024-09-18.0"
     overture_release_path = "wasbs://release@overturemapswestus2.blob.core.windows.net" #  "s3://overturemaps-us-west-2/release"
     base_output_path = "wasbs://test@ovtpipelinedev.blob.core.windows.net/transportation-splits" # "s3://<bucket>/transportation-split"
 
     wkt_filter = None
 
     # South America polygon
-    wkt_filter = "POLYGON ((-180 -90, 180 -90, 180 -59, -25.8 -59, -25.8 28.459033, -79.20293 28.05483, -79.947494 24.627045, -86.352539 22.796439, -81.650495 15.845105, -82.60631 10.260871, -84.51781 8.331083, -107.538877 10.879395, -120 -59, -180 -59, -180 -90))"
+    #wkt_filter = "POLYGON ((-180 -90, 180 -90, 180 -59, -25.8 -59, -25.8 28.459033, -79.20293 28.05483, -79.947494 24.627045, -86.352539 22.796439, -81.650495 15.845105, -82.60631 10.260871, -84.51781 8.331083, -107.538877 10.879395, -120 -59, -180 -59, -180 -90))"
 
     # Tiny test polygon in Bellevue WA
-    #wkt_filter = "POLYGON ((-122.1896338 47.6185118, -122.1895695 47.6124029, -122.1792197 47.6129526, -122.1793771 47.6178368, -122.1896338 47.6185118))"
+    wkt_filter = "POLYGON ((-122.1896338 47.6185118, -122.1895695 47.6124029, -122.1792197 47.6129526, -122.1793771 47.6178368, -122.1896338 47.6185118))"
 
     input_path = f"{overture_release_path}/{overture_release_version}/theme=transportation"
     filter_target = "global" if not wkt_filter else "filtered"
     output_path = f"{base_output_path}/{overture_release_version}/{filter_target}"
 
-    result_df = split_transportation(spark, input_path, output_path, wkt_filter, reuse_existing_intermediate_outputs=True)
+    
+    result_df = split_transportation(spark, sc, input_path, output_path, wkt_filter)
     if "DATABRICKS_RUNTIME_VERSION" in os.environ:
         display(result_df.filter('type == "segment"').limit(50))
     else:
