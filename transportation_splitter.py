@@ -7,6 +7,7 @@
 # COMMAND ----------
 
 from collections import deque
+from copy import deepcopy
 from pyspark.sql.functions import expr, lit, col, explode, collect_list, struct, udf, struct, count, size, split, element_at, coalesce, round as _round
 from pyspark.sql.types import *
 from pyspark.sql.utils import AnalysisException
@@ -15,7 +16,8 @@ import pyproj
 from shapely.geometry import Point, LineString
 from shapely import wkt
 from timeit import default_timer as timer
-from typing import NamedTuple, Optional, Any
+from typing import Optional, Any
+from dataclasses import dataclass, field
 import traceback
 import os
 
@@ -31,7 +33,8 @@ latlong coordinates are not found on the geometry because of rounding.
 """
 IS_ON_SUB_SEGMENT_THRESHOLD_METERS = 0.001
 
-class SplitConfig(NamedTuple):
+@dataclass
+class SplitConfig:
     """
     Controls wether or not to introduce a split on every connector along the segment
     """
@@ -42,13 +45,13 @@ class SplitConfig(NamedTuple):
     If left emtpy all then columns in the input parquet are considered.
     If non-empty list is provided, then only those columns are considered.
     """
-    lr_columns_to_include: list[str] = []
+    lr_columns_to_include: list[str] = field(default_factory=list)
 
     """
     Which columns to explicitly exclude when looking for 'between' LR values to split at.
     Behaves like the include counterpart but negative.
     """
-    lr_columns_to_exclude: list[str] = []
+    lr_columns_to_exclude: list[str] = field(default_factory=list)
 
     """
     How many digits to round the lat and long for split points.
@@ -66,10 +69,10 @@ class SplitConfig(NamedTuple):
     Skips steps for which intermediate streams are found, default True, set to False to always force reprocess all sub-steps 
     """
     reuse_existing_intermediate_outputs: bool = True
-
 DEFAULT_CFG = SplitConfig()
 
-class JoinedConnector(NamedTuple):
+@dataclass
+class JoinedConnector:
     connector_id: str
     connector_geometry: Point
     connector_index: int
@@ -475,7 +478,7 @@ def get_connectors_for_split(split_segment: SplitSegment, original_connectors: l
                              c["at"] > split_segment.start_split_point.lr and 
                              c["at"] < split_segment.end_split_point.lr and 
                              not any(x["connector_id"]==c["connector_id"] for x in connectors_for_split)]
-    connectors_for_split = sorted(connectors_for_split, key=lambda c: c["at"])    
+    connectors_for_split = sorted(connectors_for_split, key=lambda c: c["at"])
     # now recalculate the "at" location references to be relative to the split - round to 9 digits for consistency with overture input data
     for c in connectors_for_split:
         if c["at"] is not None:
@@ -483,7 +486,7 @@ def get_connectors_for_split(split_segment: SplitSegment, original_connectors: l
     return connectors_for_split
 
 def get_split_segment_dict(original_segment_dict, original_segment_geometry, original_segment_length, split_segment, lr_columns_for_splitting, lr_min_overlap_meters):
-    modified_segment_dict = original_segment_dict.copy()
+    modified_segment_dict = deepcopy(original_segment_dict)
     #debug_messages.append("type(start_lr)=" + str(type(split_segment.start_split_point.lr)))
     #debug_messages.append("type(geometry)=" + str(type(wkb.dumps(split_segment.geometry))))
     modified_segment_dict["start_lr"] = float(split_segment.start_split_point.lr)
