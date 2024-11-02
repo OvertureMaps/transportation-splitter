@@ -9,23 +9,21 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # From AWS Glue and Databricks latest runtimes
-        # Must be coupled due to incompabilities across versions
-        version: [{python: "3.10", pyspark: "3.3.0"}, {python: "3.11", pyspark: "3.5.0"}]
+        python-version: ["3.10", "3.11"]
     steps:
     - name: Check out repository
       uses: actions/checkout@v4
-    - name: Set up Python ${{ matrix.version.python }}
+    - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.version.python }}
+        python-version: ${{ matrix.python-version }}
     - name: Check Python version
       run: python --version
     - name: Upgrade pip
       run: pip install --upgrade pip
-    - name: Install packages
-      run: pip install -r requirements.txt
-    - name: Install pyspark ${{ matrix.version.pyspark }}
-      run: pip install pyspark==${{ matrix.version.pyspark }}
+    - name: Install poetry
+      run: pip install poetry
+    - name: Install dependencies
+      run: poetry install
     - name: Run tests
-      run: pytest -vv
+      run: poetry run pytest -vv
