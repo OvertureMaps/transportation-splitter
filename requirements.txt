@@ -1,0 +1,7 @@
+# Deprecated in favor of pyproject.toml, preserving until @ibantea can test on Databricks without this
+apache-sedona==1.6.1
+numpy<2 # shapely needs numpy version to be < 2
+pyproj==3.6.1
+pyspark==3.5.1
+shapely==2.0.2
+pytest>=8
