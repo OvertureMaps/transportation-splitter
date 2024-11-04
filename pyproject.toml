@@ -8,7 +8,7 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.10"
-pyproj = ">=3.6.1"
+pyproj = "^3.6.1"
 pyspark = [
     # AWS Glue 4.0
     {version = "3.3.0", python = "3.10"},
@@ -16,7 +16,6 @@ pyspark = [
     {version = "3.5.0", python = "3.11"},
 ]
 apache-sedona = "^1.6.1"
-shapely = "^2.0.6"
 
 [tool.poetry.group.test.dependencies]
 pytest = ">=8"
