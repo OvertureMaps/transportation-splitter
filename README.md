@@ -24,19 +24,19 @@ If you also have access to other open or proprietary data feeds that map Overtur
 
 ## Getting Started
 
-Any Spark environment should work, but for reference this was tested on Databricks on Azure (Runtime: 13.3 LTS - Apache Spark 3.4.1, Scala 2.12) and AWS Glue.
+Any Spark environment should work, but for reference this is tested on:
+1. Databricks on Azure (Runtime: 15.4 LTS - Apache Spark 3.5.0, Scala 2.12, Python 3.11)
+2. AWS Glue (Version: Glue 4.0 - Spark 3.3.0, Scala 2.12, Python 3.10)
 
 ### Dependencies
 
-See [requirements.txt](/requirements.txt) for used pip packages.
+See [pyproject.toml](/pyproject.toml) for used pip packages or install with `poetry install`.
 
 ### Installing
 
-**Spark config** (needed for sedona)
+**Local install**
 ```
-spark.serializer org.apache.spark.serializer.KryoSerializer
-spark.kryo.registrator org.apache.sedona.core.serde.SedonaKryoRegistrator
-spark.sql.extensions org.apache.sedona.viz.sql.SedonaVizExtensions,org.apache.sedona.sql.SedonaSqlExtensions
+poetry install
 ```
 
 **AWS Glue Notebook example config**
@@ -66,8 +66,6 @@ This for example first filter data within the given polygon then would split onl
 ```python
 split_transportation(spark, sc, input_path, output_path, wkt_filter="POLYGON(...)", SplitConfig(split_at_connectors=False, lr_columns_to_include=["road_flags"]))
 ```
-
-If you are using databricks you can also add this repo as a git folder, see instructions [here](https://docs.databricks.com/en/repos/repos-setup.html).
 
 If you are using databricks you can also add this repo as a git folder, see instructions [here](https://docs.databricks.com/en/repos/repos-setup.html).
 
