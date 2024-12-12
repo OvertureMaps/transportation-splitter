@@ -9,6 +9,7 @@ from transportation_splitter import (
     PROHIBITED_TRANSITIONS_COLUMN,
     split_transportation,
     SplitConfig,
+    SplitterDataWrangler,
 )
 
 
@@ -68,8 +69,7 @@ def test_split_no_connector_split(spark_session):
     result_df = split_transportation(
         spark_session,
         spark_session.sparkContext,
-        input_path,
-        output_path,
+        SplitterDataWrangler(input_path=input_path, output_path_prefix=output_path),
         cfg=test_config,
     )
 
@@ -126,8 +126,7 @@ def test_split_all_connectors(spark_session):
     result_df = split_transportation(
         spark_session,
         spark_session.sparkContext,
-        input_path,
-        output_path,
+        SplitterDataWrangler(input_path=input_path, output_path_prefix=output_path),
         cfg=test_config,
     )
 

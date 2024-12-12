@@ -52,17 +52,17 @@ class SplitterDataWrangler:
         # Reads in dataframe for given step, must handle `read_input` step at minimum
         custom_read_hook: Optional[Callable[[SparkSession, SplitterStep, str], DataFrame]] = None,
         # Checks if step already materialized and can be read in
-        custom_probe_hook: Optional[Callable[[SparkSession, SplitterStep, str], DataFrame]] = None,
+        custom_exists_hook: Optional[Callable[[SparkSession, SplitterStep, str], DataFrame]] = None,
         # Writes out dataframe for given step, must handle `final_output` step at minimum
         custom_write_hook: Optional[Callable[[DataFrame, SplitterStep, str], None]] = None
     ):
         self.output_path_prefix = output_path_prefix.rstrip('/')
         self.input_path = input_path.rstrip('/')
         self.custom_read_hook = custom_read_hook
-        self.custom_probe_hook = custom_probe_hook
+        self.custom_exists_hook = custom_exists_hook
         self.custom_write_hook = custom_write_hook
-        if custom_read_hook or custom_probe_hook or custom_write_hook:
-            assert custom_read_hook and custom_probe_hook and custom_write_hook, "If any custom hook is provided, all must be provided"
+        if custom_read_hook or custom_exists_hook or custom_write_hook:
+            assert custom_read_hook and custom_exists_hook and custom_write_hook, "If any custom hook is provided, all must be provided"
 
     def read(self, spark: SparkSession, step: SplitterStep) -> DataFrame:
         if self.custom_read_hook:
@@ -72,9 +72,9 @@ class SplitterDataWrangler:
         read_path = self.default_path_for_step(step)
         return SplitterDataWrangler.read_geoparquet(spark, read_path)
         
-    def probe(self, spark: SparkSession, step: SplitterStep) -> bool:
-        if self.custom_probe_hook:
-            return self.custom_probe_hook(spark, step, self.input_path)
+    def check_exists(self, spark: SparkSession, step: SplitterStep) -> bool:
+        if self.custom_exists_hook:
+            return self.custom_exists_hook(spark, step, self.input_path)
         
         read_path = self.default_path_for_step(step)
         return SplitterDataWrangler.parquet_exists(spark, read_path)
@@ -1049,7 +1049,7 @@ def split_transportation(spark, sc, wrangler: SplitterDataWrangler, filter_wkt=N
         filtered_df = wrangler.read(spark, SplitterStep.read_input)
     else:
         # Step 1 Filter only features that intersect with given polygon wkt
-        if not wrangler.probe(spark, SplitterStep.spatial_filter) or not cfg.reuse_existing_intermediate_outputs:
+        if not wrangler.check_exists(spark, SplitterStep.spatial_filter) or not cfg.reuse_existing_intermediate_outputs:
             input_df = wrangler.read(spark, SplitterStep.read_input)
             print(f"input_df.count() = {str(input_df.count())}")
             print(f"filter_df()...")
@@ -1065,7 +1065,7 @@ def split_transportation(spark, sc, wrangler: SplitterDataWrangler, filter_wkt=N
     print(lr_columns_for_splitting)
 
     # Step 2 Join connector geometries with segments
-    if not wrangler.probe(spark, SplitterStep.joined) or not cfg.reuse_existing_intermediate_outputs:
+    if not wrangler.check_exists(spark, SplitterStep.joined) or not cfg.reuse_existing_intermediate_outputs:
         print(f"join_segments_with_connectors()...")
         joined_df = join_segments_with_connectors(filtered_df)
         wrangler.write(joined_df, SplitterStep.joined)
@@ -1075,7 +1075,7 @@ def split_transportation(spark, sc, wrangler: SplitterDataWrangler, filter_wkt=N
     print(f"joined_df.count() = {str(joined_df.count())}")
 
     # Step 3 Split segments applying UDF on each segment+its connectors
-    if not wrangler.probe(spark, SplitterStep.raw_split) or not cfg.reuse_existing_intermediate_outputs:
+    if not wrangler.check_exists(spark, SplitterStep.raw_split) or not cfg.reuse_existing_intermediate_outputs:
         print(f"split_joined_segments()...")
         split_segments_df = split_joined_segments(sc, joined_df, lr_columns_for_splitting, cfg)
         wrangler.write(split_segments_df, SplitterStep.raw_split)
@@ -1097,7 +1097,7 @@ def split_transportation(spark, sc, wrangler: SplitterDataWrangler, filter_wkt=N
         F.sum(F.when(F.col("length_diff") > 0, F.col("length_diff")).otherwise(0)).cast("int").alias("length_added")
     ).show()
 
-    if not wrangler.probe(spark, SplitterStep.segment_splits_exploded) or not cfg.reuse_existing_intermediate_outputs:
+    if not wrangler.check_exists(spark, SplitterStep.segment_splits_exploded) or not cfg.reuse_existing_intermediate_outputs:
         exploded_df = flat_res_df.withColumn("split_segment_row", F.explode_outer("split_segments_rows")).drop("split_segments_rows")
         print("exploded_df")
 
