@@ -1080,7 +1080,7 @@ def split_transportation(spark, sc, input_path, output_path, filter_wkt=None, cf
 
 # COMMAND ----------
 if 'spark' in globals():
-    overture_release_version = "2024-09-18.0"
+    overture_release_version = "2024-11-13.0"
     overture_release_path = "wasbs://release@overturemapswestus2.blob.core.windows.net" #  "s3://overturemaps-us-west-2/release"
     base_output_path = "wasbs://test@ovtpipelinedev.blob.core.windows.net/transportation-splits" # "s3://<bucket>/transportation-split"
 
