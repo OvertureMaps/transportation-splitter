@@ -90,7 +90,8 @@ class SplitterDataWrangler:
                     .option("compression", "zstd") \
                     .option("parquet.block.size", 16 * 1024 * 1024) \
                     .save(write_path)
-        return SplitterDataWrangler.write_geoparquet(df, write_path)
+            return
+        SplitterDataWrangler.write_geoparquet(df, write_path)
 
     def default_path_for_step(self, step: SplitterStep) -> str:
         if step == SplitterStep.read_input:
@@ -143,6 +144,9 @@ class SplitterDataWrangler:
         except AnalysisException:
             # If an AnalysisException is thrown, it likely means the path does not exist or is inaccessible
             return False
+    
+    def __str__(self) -> str:
+        return f"SplitterDataWrangler(input_path='{self.input_path}', output_path_prefix='{self.output_path_prefix}')"
 
 @dataclass
 class SplitConfig:
