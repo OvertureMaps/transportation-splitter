@@ -2,6 +2,7 @@ import logging
 from importlib.metadata import version
 
 import pytest
+from pyspark.sql import Row
 from sedona.spark import *
 from transportation_splitter import (
     DESTINATIONS_COLUMN,
