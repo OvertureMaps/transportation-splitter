@@ -2,23 +2,13 @@ import logging
 from importlib.metadata import version
 
 import pytest
-from pyspark.sql import SparkSession, Row
-from pyspark.sql.types import (
-    StructType,
-    StructField,
-    MapType,
-    ArrayType,
-    DoubleType,
-    LongType,
-    StringType,
-    IntegerType,
-)
+from pyspark.sql import Row
 from sedona.spark import *
 from transportation_splitter import (
+    DESTINATIONS_COLUMN,
+    PROHIBITED_TRANSITIONS_COLUMN,
     split_transportation,
     SplitConfig,
-    PROHIBITED_TRANSITIONS_COLUMN,
-    DESTINATIONS_COLUMN,
 )
 
 
@@ -35,10 +25,10 @@ def spark_session(request):
     spark_version = version("pyspark")
     minor_version = int(spark_version.split(".")[1])
 
-    # Sedona recommends using matching major.minor version for spark >= 3.4
+    # Sedona recommends using matching major.minor version for spark >= 3.3
     # See latest instructions here: https://sedona.apache.org/latest/setup/install-python/
     spark_version_for_sedona = "3.0"
-    if minor_version >= 4:
+    if minor_version >= 3:
         spark_version_for_sedona = f"3.{minor_version}"
 
     spark = (
@@ -48,8 +38,8 @@ def spark_session(request):
         .config("spark.driver.bindAddress", "127.0.0.1")
         .config(
             "spark.jars.packages",
-            f"org.apache.sedona:sedona-spark-{spark_version_for_sedona}_2.12:1.6.1,"
-            "org.datasyslab:geotools-wrapper:1.6.1-28.2",
+            f"org.apache.sedona:sedona-spark-{spark_version_for_sedona}_2.12:1.7.0,"
+            "org.datasyslab:geotools-wrapper:1.7.0-28.5",
         )
         .config(
             "spark.jars.repositories",

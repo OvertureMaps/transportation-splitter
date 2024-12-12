@@ -43,10 +43,22 @@ poetry install
 ```
 %idle_timeout 60
 %worker_type G.2X
-%number_of_workers 50
+# Will need more workers to process planet, recommended 100
+%number_of_workers 5
+%glue_version 4.0
 
-%additional_python_modules apache-sedona==1.6.1,shapely,pyproj
-%extra_jars https://repo1.maven.org/maven2/org/apache/sedona/sedona-spark-shaded-3.0_2.12/1.6.1/sedona-spark-shaded-3.0_2.12-1.6.1.jar,https://repo1.maven.org/maven2/org/datasyslab/geotools-wrapper/1.6.1-28.2/geotools-wrapper-1.6.1-28.2.jar
+%additional_python_modules apache-sedona==1.7.0,shapely,pyproj
+%extra_jars https://repo1.maven.org/maven2/org/apache/sedona/sedona-spark-shaded-3.3_2.12/1.7.0/sedona-spark-shaded-3.3_2.12-1.7.0.jar,https://repo1.maven.org/maven2/org/datasyslab/geotools-wrapper/1.7.0-28.5/geotools-wrapper-1.7.0-28.5.jar
+```
+
+**Validating Spark setup**
+To ensure environment is properly configured for Sedona, run this test code before attempting to use the notebook:
+
+```
+from sedona.spark import *
+
+sedona = SedonaContext.create(spark)
+sedona.sql("SELECT ST_POINT(1., 2.) as geom").show()
 ```
 
 ### Executing program
