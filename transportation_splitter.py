@@ -42,7 +42,6 @@ class SplitterStep(Enum):
     segment_splits_exploded = "4_segments_splits"
     final_output = "final"
 
-
 # Interface for splitter I/O
 class SplitterDataWrangler:
     def __init__(
@@ -139,9 +138,6 @@ class SplitterDataWrangler:
 
     @staticmethod
     def write_geoparquet(df, path):
-        # partitionBy('theme','type') used to create the subfolder structure like parquet/theme=*/type=*/
-        # maxRecordsPerFile is used to control single file containing max 10m rows to control the file size, will ensure that your output files don't exceed a certain number of rows, but only a single task will be able to write out these files serially. One task will have to work through the entire data partition, instead of being able to write out that large data partition with multiple tasks.
-        #.option("maxRecordsPerFile", 10000000) \
         # parquet.block.size is used to control the row group size for parquet file
         df.write.format("geoparquet") \
             .option("compression", "zstd") \
