@@ -38,7 +38,7 @@ class SplitterStep(Enum):
     read_input = "input"
     spatial_filter = "1_spatially_filtered"
     joined = "2_joined"
-    raw_split = "3_raw_split"
+    raw_split = "3_raw_split" # Note that this step has no geometry and must be done with vanilla parquet
     segment_splits_exploded = "4_segments_splits"
     final_output = "final"
 
@@ -50,6 +50,7 @@ class SplitterDataWrangler:
         input_path: str,
         output_path_prefix: str,
         # Reads in dataframe for given step, must handle `read_input` step at minimum
+        # For returned spatial dataframes, the geometry column must be named "geometry"
         custom_read_hook: Optional[Callable[[SparkSession, SplitterStep, str], DataFrame]] = None,
         # Checks if step already materialized and can be read in
         custom_exists_hook: Optional[Callable[[SparkSession, SplitterStep, str], DataFrame]] = None,
@@ -66,24 +67,40 @@ class SplitterDataWrangler:
 
     def read(self, spark: SparkSession, step: SplitterStep) -> DataFrame:
         if self.custom_read_hook:
-            # TODO - validate the input has a properly configured geometry column
-            return self.custom_read_hook(spark, step, self.input_path)
+            base_path = self.input_path if step == SplitterStep.read_input else self.output_path_prefix
+            print(f"Calling custom read hook for step {step} at {base_path}")
+            df = self.custom_read_hook(spark, step, base_path)
+            # Validate properly configured geometry column
+            if step != SplitterStep.raw_split:
+                try:
+                    _ = df.selectExpr("ST_AsText(geometry)")
+                except Exception as e:
+                    raise ValueError(f"The read dataframe must have a valid geometry column named `geometry`, exception: {e}")
+            return df
 
         read_path = self.default_path_for_step(step)
+        print(f"Calling default write for step {step} at {read_path}")
+        if step == SplitterStep.raw_split:
+            return SplitterDataWrangler.read_parquet(spark, read_path)
         return SplitterDataWrangler.read_geoparquet(spark, read_path)
         
     def check_exists(self, spark: SparkSession, step: SplitterStep) -> bool:
         if self.custom_exists_hook:
-            return self.custom_exists_hook(spark, step, self.input_path)
+            print(f"Calling custom exists hook for step {step} at {self.output_path_prefix}")
+            return self.custom_exists_hook(spark, step, self.output_path_prefix)
         
         read_path = self.default_path_for_step(step)
+        print(f"Calling default check exists for step {step} at {read_path}")
         return SplitterDataWrangler.parquet_exists(spark, read_path)
 
     def write(self, df: DataFrame, step: SplitterStep):
         if self.custom_write_hook:
+            print(f"Calling custom write hook for step {step} at {self.output_path_prefix}")
             self.custom_write_hook(df, step, self.output_path_prefix)
+            return
 
         write_path = self.default_path_for_step(step)
+        print(f"Calling default write for step {step} at {write_path}")
         if step == SplitterStep.raw_split:
             # This step must be written as parquet only, it doesn't contain geometry
             df.write.format("parquet").mode("overwrite") \
@@ -94,12 +111,7 @@ class SplitterDataWrangler:
         SplitterDataWrangler.write_geoparquet(df, write_path)
 
     def default_path_for_step(self, step: SplitterStep) -> str:
-        if step == SplitterStep.read_input:
-            return self.input_path
-        elif step == SplitterStep.final_output:
-            return self.output_path_prefix
-        else:
-            return self.output_path_prefix + "_" + step.value
+        return self.input_path if step == SplitterStep.read_input else self.output_path_prefix + "_" + step.value
 
     @staticmethod
     def read_parquet(spark, path, merge_schema=False):
