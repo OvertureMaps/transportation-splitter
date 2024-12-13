@@ -134,6 +134,7 @@ def test_split_all_connectors(spark_session):
 
     validate_all_connector_split(result_df)
 
+
 def test_custom_hooks(spark_session):
     input_path = "test/data/*.parquet"
     output_path = "test/out/custom_hooks"
@@ -151,11 +152,18 @@ def test_custom_hooks(spark_session):
         if step == SplitterStep.raw_split:
             return spark.read.option("mergeSchema", "true").parquet(read_path)
         elif step == SplitterStep.read_input:
-            return spark.read.option("mergeSchema", "true").parquet(read_path) \
+            return (
+                spark.read.option("mergeSchema", "true")
+                .parquet(read_path)
                 .withColumn("geometry", expr("ST_GeomFromWKB(geometry)"))
+            )
         else:
-            return spark.read.option("mergeSchema", "true").format("geoparquet").load(read_path)
-        
+            return (
+                spark.read.option("mergeSchema", "true")
+                .format("geoparquet")
+                .load(read_path)
+            )
+
     def check_exists(_spark, _step, _output_path_prefix):
         return False
 
@@ -163,18 +171,34 @@ def test_custom_hooks(spark_session):
         write_path = output_path_prefix + f"_{step.name.lower()}/"
         print(f"Test writing to {write_path}")
         if step == SplitterStep.raw_split:
-            return df.write.mode("overwrite").option("mergeSchema", "true").parquet(write_path)
+            return (
+                df.write.mode("overwrite")
+                .option("mergeSchema", "true")
+                .parquet(write_path)
+            )
         else:
-            return df.write.format("geoparquet").mode("overwrite").option("mergeSchema", "true").save(write_path)
+            return (
+                df.write.format("geoparquet")
+                .mode("overwrite")
+                .option("mergeSchema", "true")
+                .save(write_path)
+            )
 
     result_df = split_transportation(
         spark_session,
         spark_session.sparkContext,
-        SplitterDataWrangler(input_path=input_path, output_path_prefix=output_path, custom_read_hook=read, custom_write_hook=write, custom_exists_hook=check_exists),
+        SplitterDataWrangler(
+            input_path=input_path,
+            output_path_prefix=output_path,
+            custom_read_hook=read,
+            custom_write_hook=write,
+            custom_exists_hook=check_exists,
+        ),
         cfg=test_config,
     )
 
     validate_all_connector_split(result_df)
+
 
 def validate_all_connector_split(result_df):
     actual_df = (
