@@ -3,12 +3,15 @@ from importlib.metadata import version
 
 import pytest
 from pyspark.sql import Row
+from pyspark.sql.functions import expr
 from sedona.spark import *
 from transportation_splitter import (
     DESTINATIONS_COLUMN,
     PROHIBITED_TRANSITIONS_COLUMN,
     split_transportation,
     SplitConfig,
+    SplitterDataWrangler,
+    SplitterStep,
 )
 
 
@@ -68,8 +71,7 @@ def test_split_no_connector_split(spark_session):
     result_df = split_transportation(
         spark_session,
         spark_session.sparkContext,
-        input_path,
-        output_path,
+        SplitterDataWrangler(input_path=input_path, output_path_prefix=output_path),
         cfg=test_config,
     )
 
@@ -126,11 +128,79 @@ def test_split_all_connectors(spark_session):
     result_df = split_transportation(
         spark_session,
         spark_session.sparkContext,
-        input_path,
-        output_path,
+        SplitterDataWrangler(input_path=input_path, output_path_prefix=output_path),
         cfg=test_config,
     )
 
+    validate_all_connector_split(result_df)
+
+
+def test_custom_hooks(spark_session):
+    input_path = "test/data/*.parquet"
+    output_path = "test/out/custom_hooks"
+
+    test_config = SplitConfig(
+        split_at_connectors=True,
+        reuse_existing_intermediate_outputs=False,
+    )
+
+    def read(spark, step, base_path):
+        read_path = base_path + f"_{step.name.lower()}/"
+        print(f"Test reading from {read_path}")
+        if step == SplitterStep.read_input:
+            read_path = base_path
+        if step == SplitterStep.raw_split:
+            return spark.read.option("mergeSchema", "true").parquet(read_path)
+        elif step == SplitterStep.read_input:
+            return (
+                spark.read.option("mergeSchema", "true")
+                .parquet(read_path)
+                .withColumn("geometry", expr("ST_GeomFromWKB(geometry)"))
+            )
+        else:
+            return (
+                spark.read.option("mergeSchema", "true")
+                .format("geoparquet")
+                .load(read_path)
+            )
+
+    def check_exists(_spark, _step, _output_path_prefix):
+        return False
+
+    def write(df, step, output_path_prefix):
+        write_path = output_path_prefix + f"_{step.name.lower()}/"
+        print(f"Test writing to {write_path}")
+        if step == SplitterStep.raw_split:
+            return (
+                df.write.mode("overwrite")
+                .option("mergeSchema", "true")
+                .parquet(write_path)
+            )
+        else:
+            return (
+                df.write.format("geoparquet")
+                .mode("overwrite")
+                .option("mergeSchema", "true")
+                .save(write_path)
+            )
+
+    result_df = split_transportation(
+        spark_session,
+        spark_session.sparkContext,
+        SplitterDataWrangler(
+            input_path=input_path,
+            output_path_prefix=output_path,
+            custom_read_hook=read,
+            custom_write_hook=write,
+            custom_exists_hook=check_exists,
+        ),
+        cfg=test_config,
+    )
+
+    validate_all_connector_split(result_df)
+
+
+def validate_all_connector_split(result_df):
     actual_df = (
         result_df.filter("id = '08728d5430ffffff04767d5cdb906cb5'")
         .sort("start_lr")

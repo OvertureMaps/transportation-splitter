@@ -8,15 +8,16 @@
 
 from collections import deque
 from copy import deepcopy
+from enum import Enum
 from pyspark.sql.functions import expr, lit, col, explode, collect_list, struct, udf, struct, count, size, split, element_at, coalesce, round as _round
 from pyspark.sql.types import *
 from pyspark.sql.utils import AnalysisException
-from pyspark.sql import DataFrame, functions as F
+from pyspark.sql import DataFrame, functions as F, SparkSession
 import pyproj
 from shapely.geometry import Point, LineString
 from shapely import wkt
 from timeit import default_timer as timer
-from typing import Optional, Any
+from typing import Optional, Any, Callable
 from dataclasses import dataclass, field
 import traceback
 import os
@@ -32,6 +33,128 @@ place in the segment's coordinates, for dealing with edge cases where the exact 
 latlong coordinates are not found on the geometry because of rounding.
 """
 IS_ON_SUB_SEGMENT_THRESHOLD_METERS = 0.001
+
+class SplitterStep(Enum):
+    read_input = "input"
+    spatial_filter = "1_spatially_filtered"
+    joined = "2_joined"
+    raw_split = "3_raw_split" # Note that this step has no geometry and must be done with vanilla parquet
+    segment_splits_exploded = "4_segments_splits"
+    final_output = "final"
+
+# Interface for splitter I/O
+class SplitterDataWrangler:
+    def __init__(
+        self,
+        input_path: str,
+        output_path_prefix: str,
+        # Reads in dataframe for given step, must handle `read_input` step at minimum
+        # For returned spatial dataframes, the geometry column must be named "geometry"
+        custom_read_hook: Optional[Callable[[SparkSession, SplitterStep, str], DataFrame]] = None,
+        # Checks if step already materialized and can be read in
+        custom_exists_hook: Optional[Callable[[SparkSession, SplitterStep, str], DataFrame]] = None,
+        # Writes out dataframe for given step, must handle `final_output` step at minimum
+        custom_write_hook: Optional[Callable[[DataFrame, SplitterStep, str], None]] = None
+    ):
+        self.output_path_prefix = output_path_prefix.rstrip('/')
+        self.input_path = input_path.rstrip('/')
+        self.custom_read_hook = custom_read_hook
+        self.custom_exists_hook = custom_exists_hook
+        self.custom_write_hook = custom_write_hook
+        if custom_read_hook or custom_exists_hook or custom_write_hook:
+            assert custom_read_hook and custom_exists_hook and custom_write_hook, "If any custom hook is provided, all must be provided"
+
+    def read(self, spark: SparkSession, step: SplitterStep) -> DataFrame:
+        if self.custom_read_hook:
+            base_path = self.input_path if step == SplitterStep.read_input else self.output_path_prefix
+            print(f"Calling custom read hook for step {step} at {base_path}")
+            df = self.custom_read_hook(spark, step, base_path)
+            # Validate properly configured geometry column
+            if step != SplitterStep.raw_split:
+                try:
+                    _ = df.selectExpr("ST_AsText(geometry)")
+                except Exception as e:
+                    raise ValueError(f"The read dataframe must have a valid geometry column named `geometry`, exception: {e}")
+            return df
+
+        read_path = self.default_path_for_step(step)
+        print(f"Calling default write for step {step} at {read_path}")
+        if step == SplitterStep.raw_split:
+            return SplitterDataWrangler.read_parquet(spark, read_path)
+        return SplitterDataWrangler.read_geoparquet(spark, read_path)
+        
+    def check_exists(self, spark: SparkSession, step: SplitterStep) -> bool:
+        if self.custom_exists_hook:
+            print(f"Calling custom exists hook for step {step} at {self.output_path_prefix}")
+            return self.custom_exists_hook(spark, step, self.output_path_prefix)
+        
+        read_path = self.default_path_for_step(step)
+        print(f"Calling default check exists for step {step} at {read_path}")
+        return SplitterDataWrangler.parquet_exists(spark, read_path)
+
+    def write(self, df: DataFrame, step: SplitterStep):
+        if self.custom_write_hook:
+            print(f"Calling custom write hook for step {step} at {self.output_path_prefix}")
+            self.custom_write_hook(df, step, self.output_path_prefix)
+            return
+
+        write_path = self.default_path_for_step(step)
+        print(f"Calling default write for step {step} at {write_path}")
+        if step == SplitterStep.raw_split:
+            # This step must be written as parquet only, it doesn't contain geometry
+            df.write.format("parquet").mode("overwrite") \
+                    .option("compression", "zstd") \
+                    .option("parquet.block.size", 16 * 1024 * 1024) \
+                    .save(write_path)
+            return
+        SplitterDataWrangler.write_geoparquet(df, write_path)
+
+    def default_path_for_step(self, step: SplitterStep) -> str:
+        return self.input_path if step == SplitterStep.read_input else self.output_path_prefix + "_" + step.value
+
+    @staticmethod
+    def read_parquet(spark, path, merge_schema=False):
+        return spark.read.option("mergeSchema", str(merge_schema).lower()).parquet(path)
+
+    @staticmethod
+    def is_geoparquet(spark, input_path, limit=1, geometry_column="geometry", merge_schema=False):
+        try:
+            sample_data = spark.read.format("geoparquet").option("mergeSchema", str(merge_schema).lower()).load(input_path).limit(limit)
+            geometry_column_data_type = sample_data.schema[geometry_column].dataType
+            # GeoParquet uses GeometryType, and WKB uses BinaryType
+            return str(geometry_column_data_type) == "GeometryType()"
+        except Exception as e:
+            # read_geoparquet would throw an exception if it's not a geoparquet file.
+            # Assume it's parquet format here.
+            return False
+
+    @staticmethod
+    def read_geoparquet(spark, path, merge_schema=True, geometry_column="geometry"):
+        if SplitterDataWrangler.is_geoparquet(spark, path, geometry_column=geometry_column):
+            return spark.read.format("geoparquet").option("mergeSchema", str(merge_schema).lower()).load(path)
+        else:
+            return spark.read.option("mergeSchema", str(merge_schema).lower()).parquet(path) \
+                .withColumn(geometry_column, expr("ST_GeomFromWKB(geometry)"))
+
+    @staticmethod
+    def write_geoparquet(df, path):
+        # parquet.block.size is used to control the row group size for parquet file
+        df.write.format("geoparquet") \
+            .option("compression", "zstd") \
+            .option("parquet.block.size", 16 * 1024 * 1024) \
+            .mode("overwrite").save(path)
+
+    @staticmethod
+    def parquet_exists(spark, path):
+        try:
+            spark.read.format("parquet").load(path).limit(0)
+            return True
+        except AnalysisException:
+            # If an AnalysisException is thrown, it likely means the path does not exist or is inaccessible
+            return False
+    
+    def __str__(self) -> str:
+        return f"SplitterDataWrangler(input_path='{self.input_path}', output_path_prefix='{self.output_path_prefix}')"
 
 @dataclass
 class SplitConfig:
@@ -105,47 +228,6 @@ class SplitSegment:
     @property
     def length(self) -> float:
         return self.end_split_point.lr_meters - self.start_split_point.lr_meters
-
-
-def read_parquet(spark, path, merge_schema=False):
-    return spark.read.option("mergeSchema", str(merge_schema).lower()).parquet(path)
-
-def is_geoparquet(spark, input_path, limit=1, geometry_column="geometry", merge_schema=False):
-    try:
-        sample_data = spark.read.format("geoparquet").option("mergeSchema", str(merge_schema).lower()).load(input_path).limit(limit)
-        geometry_column_data_type = sample_data.schema[geometry_column].dataType
-        # GeoParquet uses GeometryType, and WKB uses BinaryType
-        return str(geometry_column_data_type) == "GeometryType()"
-    except Exception as e:
-        # read_geoparquet would throw an exception if it's not a geoparquet file.
-        # Assume it's parquet format here.
-        return False
-
-
-def read_geoparquet(spark, path, merge_schema=True, geometry_column="geometry"):
-    if is_geoparquet(spark, path, geometry_column=geometry_column):
-        return spark.read.format("geoparquet").option("mergeSchema", str(merge_schema).lower()).load(path)
-    else:
-        return spark.read.option("mergeSchema", str(merge_schema).lower()).parquet(path) \
-            .withColumn(geometry_column, expr("ST_GeomFromWKB(geometry)"))
-
-def write_geoparquet(df, path):
-    # partitionBy('theme','type') used to create the subfolder structure like parquet/theme=*/type=*/
-    # maxRecordsPerFile is used to control single file containing max 10m rows to control the file size, will ensure that your output files don't exceed a certain number of rows, but only a single task will be able to write out these files serially. One task will have to work through the entire data partition, instead of being able to write out that large data partition with multiple tasks.
-    #.option("maxRecordsPerFile", 10000000) \
-    # parquet.block.size is used to control the row group size for parquet file
-    df.write.format("geoparquet") \
-        .option("compression", "zstd") \
-        .option("parquet.block.size", 16 * 1024 * 1024) \
-        .mode("overwrite").save(path)
-
-def parquet_exists(spark, path):
-    try:
-        spark.read.format("parquet").load(path).limit(0)
-        return True
-    except AnalysisException:
-        # If an AnalysisException is thrown, it likely means the path does not exist or is inaccessible
-        return False
 
 def contains_field_name(data_type, field_name):
     if isinstance(data_type, StructType):
@@ -964,34 +1046,29 @@ def get_aggregated_metrics(result_df):
     metrics_df = metrics_df.withColumn("percentage", _round((col("value_count") / total_row_count) * 100, 2))
     return metrics_df.orderBy('key', 'value')
 
-def split_transportation(spark, sc, input_path, output_path, filter_wkt=None, cfg:SplitConfig = DEFAULT_CFG):
-    output_path = output_path.rstrip('/')
+def split_transportation(spark, sc, wrangler: SplitterDataWrangler, filter_wkt=None, cfg: SplitConfig = DEFAULT_CFG):
     print(f"filter_wkt: {filter_wkt}")
-    print(f"input_path: {input_path}")
-    print(f"output_path: {output_path}")
+    print(f"write config: {wrangler}")
+    print(f"split config: {cfg}")
 
-    spatially_filtered_path = output_path + "_1_spatially_filtered"
-    joined_path = output_path + "_2_joined"
-    raw_split_path = output_path + "_3_raw_split"
-    segment_splits_exploded_path = output_path + "_4_segments_splits"
-
-    print(f"spatially_filtered_path: {spatially_filtered_path}")
-    print(f"joined_path: {joined_path}")
-    print(f"raw_split_path: {raw_split_path}")
-    print(f"segment_splits_exploded_path: {segment_splits_exploded_path}")
+    if not wrangler.custom_read_hook:
+        print(f"spatially_filtered_path: {wrangler.default_path_for_step(SplitterStep.spatial_filter)}")
+        print(f"joined_path: {wrangler.default_path_for_step(SplitterStep.joined)}")
+        print(f"raw_split_path: {wrangler.default_path_for_step(SplitterStep.raw_split)}")
+        print(f"segment_splits_exploded_path: {wrangler.default_path_for_step(SplitterStep.segment_splits_exploded)}")
 
     if filter_wkt is None:
-        filtered_df = read_geoparquet(spark, input_path)
+        filtered_df = wrangler.read(spark, SplitterStep.read_input)
     else:
         # Step 1 Filter only features that intersect with given polygon wkt
-        if not parquet_exists(spark, spatially_filtered_path) or not cfg.reuse_existing_intermediate_outputs:
-            input_df = read_geoparquet(spark, input_path)
+        if not wrangler.check_exists(spark, SplitterStep.spatial_filter) or not cfg.reuse_existing_intermediate_outputs:
+            input_df = wrangler.read(spark, SplitterStep.read_input)
             print(f"input_df.count() = {str(input_df.count())}")
             print(f"filter_df()...")
             filtered_df = filter_df(input_df, filter_wkt)
-            write_geoparquet(filtered_df, spatially_filtered_path)
+            wrangler.write(filtered_df, SplitterStep.spatial_filter)
         else:
-            filtered_df = read_geoparquet(spark, spatially_filtered_path)
+            filtered_df = wrangler.read(spark, SplitterStep.spatial_filter)
 
     print(f"filtered_df.count() = {str(filtered_df.count())}")
 
@@ -1000,25 +1077,22 @@ def split_transportation(spark, sc, input_path, output_path, filter_wkt=None, cf
     print(lr_columns_for_splitting)
 
     # Step 2 Join connector geometries with segments
-    if not parquet_exists(spark, joined_path) or not cfg.reuse_existing_intermediate_outputs:
+    if not wrangler.check_exists(spark, SplitterStep.joined) or not cfg.reuse_existing_intermediate_outputs:
         print(f"join_segments_with_connectors()...")
         joined_df = join_segments_with_connectors(filtered_df)
-        write_geoparquet(joined_df, joined_path)
+        wrangler.write(joined_df, SplitterStep.joined)
     else:
-        joined_df = read_geoparquet(spark, joined_path)
+        joined_df = wrangler.read(spark, SplitterStep.joined)
 
     print(f"joined_df.count() = {str(joined_df.count())}")
 
     # Step 3 Split segments applying UDF on each segment+its connectors
-    if not parquet_exists(spark, raw_split_path) or not cfg.reuse_existing_intermediate_outputs:
+    if not wrangler.check_exists(spark, SplitterStep.raw_split) or not cfg.reuse_existing_intermediate_outputs:
         print(f"split_joined_segments()...")
         split_segments_df = split_joined_segments(sc, joined_df, lr_columns_for_splitting, cfg)
-        split_segments_df.write.format("parquet").mode("overwrite") \
-                .option("compression", "zstd") \
-                .option("parquet.block.size", 16 * 1024 * 1024) \
-                .save(raw_split_path)
+        wrangler.write(split_segments_df, SplitterStep.raw_split)
     else:
-        split_segments_df = read_parquet(spark, raw_split_path)
+        split_segments_df = wrangler.write(spark, SplitterStep.raw_split)
 
     print(f"split_segments_df.count() = {str(split_segments_df.count())}")
 
@@ -1035,19 +1109,19 @@ def split_transportation(spark, sc, input_path, output_path, filter_wkt=None, cf
         F.sum(F.when(F.col("length_diff") > 0, F.col("length_diff")).otherwise(0)).cast("int").alias("length_added")
     ).show()
 
-    if not parquet_exists(spark, segment_splits_exploded_path) or not cfg.reuse_existing_intermediate_outputs:
+    if not wrangler.check_exists(spark, SplitterStep.segment_splits_exploded) or not cfg.reuse_existing_intermediate_outputs:
         exploded_df = flat_res_df.withColumn("split_segment_row", F.explode_outer("split_segments_rows")).drop("split_segments_rows")
         print("exploded_df")
 
         flat_splits_df = exploded_df.select("*", "split_segment_row.*")
         print("flat_splits_df")
 
-        write_geoparquet(flat_splits_df, segment_splits_exploded_path)
+        wrangler.write(flat_splits_df, SplitterStep.segment_splits_exploded)
 
     added_connectors_df = flat_res_df.select("added_connectors_rows")
     added_connectors_df = flat_res_df.filter(size("added_connectors_rows") > 0).select("added_connectors_rows").withColumn("connector", F.explode("added_connectors_rows")).select("connector.*")
 
-    final_segments_df = read_geoparquet(spark, segment_splits_exploded_path)
+    final_segments_df = wrangler.read(spark, SplitterStep.segment_splits_exploded)
 
     # Output error count, example errors and split stats to identify potential issues
     final_segments_df.groupBy("is_success", coalesce(element_at(split(final_segments_df["error_message"], ":"), 1), "error_message")).agg(count("*").alias("count")).show(20, False)
@@ -1069,8 +1143,8 @@ def split_transportation(spark, sc, input_path, output_path, filter_wkt=None, cf
         all_connectors_df = all_connectors_df.withColumn(extra_col, lit(None))
 
     final_df = final_segments_df.select(filtered_df.columns + extra_columns).unionByName(all_connectors_df)
-    write_geoparquet(final_df, output_path)
-    loaded_final_df = read_geoparquet(spark, output_path)
+    wrangler.write(final_df, SplitterStep.final_output)
+    loaded_final_df = wrangler.read(spark, SplitterStep.final_output)
     loaded_final_df.groupBy("type").agg(count("*").alias("count")).show()
 
     print("split segments metrics:")
@@ -1094,10 +1168,11 @@ if 'spark' in globals():
 
     input_path = f"{overture_release_path}/{overture_release_version}/theme=transportation"
     filter_target = "global" if not wkt_filter else "filtered"
-    output_path = f"{base_output_path}/{overture_release_version}/{filter_target}"
+    output_path_prefix = f"{base_output_path}/{overture_release_version}/{filter_target}"
 
-    
-    result_df = split_transportation(spark, sc, input_path, output_path, wkt_filter)
+    wrangler = SplitterDataWrangler(input_path=input_path, output_path_prefix=output_path_prefix)
+
+    result_df = split_transportation(spark, sc, wrangler, wkt_filter)
     if "DATABRICKS_RUNTIME_VERSION" in os.environ:
         display(result_df.filter('type == "segment"').limit(50))
     else:
