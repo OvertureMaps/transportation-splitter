@@ -1044,11 +1044,8 @@ def resolve_destinations_references(result_df):
     
     return result_w_destinations_resolved_df
 
-def get_aggregated_metrics(result_df, skip_count=False):
+def get_aggregated_metrics(result_df):
     segments_df = result_df.filter("type='segment'")
-    if skip_count:
-        # Skip expensive count() operation
-        return None
     total_row_count = segments_df.count()
     print(total_row_count)
     metrics_df = result_df.select(col("id"), explode(col("metrics")).alias("key", "value")).groupBy("key", "value").agg(count("value").alias("value_count"))
@@ -1164,9 +1161,7 @@ def split_transportation(spark, sc, wrangler: SplitterDataWrangler, filter_wkt=N
         loaded_final_df.groupBy("type").agg(count("*").alias("count")).show()
 
         print("split segments metrics:")
-        metrics_df = get_aggregated_metrics(loaded_final_df)
-        if metrics_df is not None:
-            metrics_df.show()
+        get_aggregated_metrics(loaded_final_df).show()
         
     return loaded_final_df
 
