@@ -1164,7 +1164,7 @@ def split_transportation(spark, sc, wrangler: SplitterDataWrangler, filter_wkt=N
         loaded_final_df.groupBy("type").agg(count("*").alias("count")).show()
 
         print("split segments metrics:")
-        metrics_df = get_aggregated_metrics(loaded_final_df, skip_count=cfg.skip_debug_output)
+        metrics_df = get_aggregated_metrics(loaded_final_df)
         if metrics_df is not None:
             metrics_df.show()
         
