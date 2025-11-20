@@ -192,6 +192,12 @@ class SplitConfig:
     Skips steps for which intermediate streams are found, default True, set to False to always force reprocess all sub-steps 
     """
     reuse_existing_intermediate_outputs: bool = True
+
+    """
+    Skips expensive debug operations like count() and show() calls, default False.
+    Set to True to improve performance by skipping debug output.
+    """
+    skip_debug_output: bool = False
 DEFAULT_CFG = SplitConfig()
 
 @dataclass
@@ -1063,14 +1069,16 @@ def split_transportation(spark, sc, wrangler: SplitterDataWrangler, filter_wkt=N
         # Step 1 Filter only features that intersect with given polygon wkt
         if not wrangler.check_exists(spark, SplitterStep.spatial_filter) or not cfg.reuse_existing_intermediate_outputs:
             input_df = wrangler.read(spark, SplitterStep.read_input)
-            print(f"input_df.count() = {str(input_df.count())}")
+            if not cfg.skip_debug_output:
+                print(f"input_df.count() = {str(input_df.count())}")
             print(f"filter_df()...")
             filtered_df = filter_df(input_df, filter_wkt)
             wrangler.write(filtered_df, SplitterStep.spatial_filter)
         else:
             filtered_df = wrangler.read(spark, SplitterStep.spatial_filter)
 
-    print(f"filtered_df.count() = {str(filtered_df.count())}")
+    if not cfg.skip_debug_output:
+        print(f"filtered_df.count() = {str(filtered_df.count())}")
 
     lr_columns_for_splitting = get_filtered_columns(get_columns_with_struct_field_name(filtered_df, LR_SCOPE_KEY), cfg.lr_columns_to_include, cfg.lr_columns_to_exclude)
     print("lr_columns_for_splitting: ")
@@ -1084,7 +1092,8 @@ def split_transportation(spark, sc, wrangler: SplitterDataWrangler, filter_wkt=N
     else:
         joined_df = wrangler.read(spark, SplitterStep.joined)
 
-    print(f"joined_df.count() = {str(joined_df.count())}")
+    if not cfg.skip_debug_output:
+        print(f"joined_df.count() = {str(joined_df.count())}")
 
     # Step 3 Split segments applying UDF on each segment+its connectors
     if not wrangler.check_exists(spark, SplitterStep.raw_split) or not cfg.reuse_existing_intermediate_outputs:
@@ -1094,20 +1103,22 @@ def split_transportation(spark, sc, wrangler: SplitterDataWrangler, filter_wkt=N
     else:
         split_segments_df = wrangler.write(spark, SplitterStep.raw_split)
 
-    print(f"split_segments_df.count() = {str(split_segments_df.count())}")
+    if not cfg.skip_debug_output:
+        print(f"split_segments_df.count() = {str(split_segments_df.count())}")
 
     # Step 4 Format output (flatten result, explode rows, pick columns, unions)
     print("split_segments_df")
 
     flat_res_df = split_segments_df.select("input_segment", "split_result.*")
     
-    print("total length stats")
-    flat_res_df.select(
-        F.sum("length_before_split").cast("int").alias("total_length_before_split"),
-        F.sum("length_after_split").cast("int").alias("total_length_after_split"),
-        F.sum(F.when(F.col("length_diff") < 0, F.col("length_diff")).otherwise(0)).cast("int").alias("length_removed"),
-        F.sum(F.when(F.col("length_diff") > 0, F.col("length_diff")).otherwise(0)).cast("int").alias("length_added")
-    ).show()
+    if not cfg.skip_debug_output:
+        print("total length stats")
+        flat_res_df.select(
+            F.sum("length_before_split").cast("int").alias("total_length_before_split"),
+            F.sum("length_after_split").cast("int").alias("total_length_after_split"),
+            F.sum(F.when(F.col("length_diff") < 0, F.col("length_diff")).otherwise(0)).cast("int").alias("length_removed"),
+            F.sum(F.when(F.col("length_diff") > 0, F.col("length_diff")).otherwise(0)).cast("int").alias("length_added")
+        ).show()
 
     if not wrangler.check_exists(spark, SplitterStep.segment_splits_exploded) or not cfg.reuse_existing_intermediate_outputs:
         exploded_df = flat_res_df.withColumn("split_segment_row", F.explode_outer("split_segments_rows")).drop("split_segments_rows")
@@ -1124,8 +1135,9 @@ def split_transportation(spark, sc, wrangler: SplitterDataWrangler, filter_wkt=N
     final_segments_df = wrangler.read(spark, SplitterStep.segment_splits_exploded)
 
     # Output error count, example errors and split stats to identify potential issues
-    final_segments_df.groupBy("is_success", coalesce(element_at(split(final_segments_df["error_message"], ":"), 1), "error_message")).agg(count("*").alias("count")).show(20, False)
-    final_segments_df.groupBy("id").agg(count("*").alias("number_of_splits")).groupBy("number_of_splits").agg(count("*")).orderBy("number_of_splits").show()
+    if not cfg.skip_debug_output:
+        final_segments_df.groupBy("is_success", coalesce(element_at(split(final_segments_df["error_message"], ":"), 1), "error_message")).agg(count("*").alias("count")).show(20, False)
+        final_segments_df.groupBy("id").agg(count("*").alias("number_of_splits")).groupBy("number_of_splits").agg(count("*")).orderBy("number_of_splits").show()
 
     all_connectors_df = filtered_df.filter("type == 'connector'").unionByName(added_connectors_df).select(filtered_df.columns)
     if PROHIBITED_TRANSITIONS_COLUMN in final_segments_df.columns:
@@ -1145,10 +1157,11 @@ def split_transportation(spark, sc, wrangler: SplitterDataWrangler, filter_wkt=N
     final_df = final_segments_df.select(filtered_df.columns + extra_columns).unionByName(all_connectors_df)
     wrangler.write(final_df, SplitterStep.final_output)
     loaded_final_df = wrangler.read(spark, SplitterStep.final_output)
-    loaded_final_df.groupBy("type").agg(count("*").alias("count")).show()
+    if not cfg.skip_debug_output:
+        loaded_final_df.groupBy("type").agg(count("*").alias("count")).show()
 
-    print("split segments metrics:")
-    get_aggregated_metrics(loaded_final_df).show()
+        print("split segments metrics:")
+        get_aggregated_metrics(loaded_final_df).show()
         
     return loaded_final_df
 
