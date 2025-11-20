@@ -79,6 +79,11 @@ This for example first filter data within the given polygon then would split onl
 split_transportation(spark, sc, input_path, output_path, wkt_filter="POLYGON(...)", SplitConfig(split_at_connectors=False, lr_columns_to_include=["road_flags"]))
 ```
 
+To improve performance by skipping expensive debug operations like `count()` and `show()` calls, set `skip_debug_output` to `True`:
+```python
+split_transportation(spark, sc, input_path, output_path, cfg=SplitConfig(skip_debug_output=True))
+```
+
 If you are using databricks you can also add this repo as a git folder, see instructions [here](https://docs.databricks.com/en/repos/repos-setup.html).
 
 ## Version History
