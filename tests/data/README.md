@@ -26,3 +26,25 @@ COPY (
         bbox.ymax <= 47.6178368
 ) TO 'segment.parquet';
 ```
+
+Boulder, CO:
+```
+COPY (
+    SELECT *
+    FROM read_parquet('s3://overturemaps-us-west-2/release/2025-12-17.0/theme=transportation/type=connector/*.parquet')
+    WHERE
+        bbox.xmin >= -105.30 AND
+        bbox.ymin >= 39.96 AND
+        bbox.xmax <= -105.15 AND
+        bbox.ymax <= 40.07
+) TO 'boulder_connectors.parquet' WITH(FORMAT PARQUET, COMPRESSION 'ZSTD');
+
+COPY (
+    SELECT *
+    FROM read_parquet('s3://overturemaps-us-west-2/release/2025-12-17.0/theme=transportation/type=segment/*.parquet')
+    WHERE
+        bbox.xmin >= -105.30 AND
+        bbox.ymin >= 39.96 AND
+        bbox.xmax <= -105.15 AND
+        bbox.ymax <= 40.07
+) TO 'boulder_segments.parquet' WITH(FORMAT PARQUET, COMPRESSION 'ZSTD');

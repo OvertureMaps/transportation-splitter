@@ -25,21 +25,49 @@ If you also have access to other open or proprietary data feeds that map Overtur
 ## Getting Started
 
 Any Spark environment should work, but for reference this is tested on:
+
 1. Databricks on Azure (Runtime: 15.4 LTS - Apache Spark 3.5.0, Scala 2.12, Python 3.11)
 2. AWS Glue (Version: Glue 4.0 - Spark 3.3.0, Scala 2.12, Python 3.10)
 
 ### Dependencies
 
-See [pyproject.toml](/pyproject.toml) for used pip packages or install with `poetry install`.
+See [pyproject.toml](/pyproject.toml) for required packages.
+
+**Requirements:**
+
+- Python 3.10+
+- Java 11+ (required for Apache Sedona 1.8.x)
+- PySpark 3.5.x
+- Apache Sedona 1.8.x
 
 ### Installing
 
-**Local install**
+**Local install with uv (recommended)**
+
+```bash
+uv sync
 ```
-poetry install
+
+**Local install with pip**
+
+```bash
+pip install -e .
+```
+
+**Running tests**
+
+```bash
+# Ensure Java 11 is being used (required for Sedona 1.8.x)
+export JAVA_HOME=/opt/homebrew/opt/openjdk@11  # macOS with Homebrew
+# Or on Linux: export JAVA_HOME=/usr/lib/jvm/java-11-openjdk
+
+# Install with test dependencies and run tests
+uv sync --group test
+uv run pytest tests/
 ```
 
 **AWS Glue Notebook example config**
+
 ```
 %idle_timeout 60
 %worker_type G.2X
@@ -63,30 +91,103 @@ sedona.sql("SELECT ST_POINT(1., 2.) as geom").show()
 
 ### Executing program
 
-For simplicity all the code and parameters are currently included in one [python script](transportation_splitter.py), please set the input variables with appropriate values for `overture_release_version`, `base_output_path` and optionally `wkt_filter` with a polygon WKT if you want to only process the subset of the Overture data that intersects with it.
+Use the `OvertureTransportationSplitter` class for a clean, object-oriented interface:
 
-The list of columns that are considered for identifying the LRs values to split at is constructed at runtime out of input parquet's schema columns that have a `between` field anywhere in their structure.
-If you want to customize that behavior please set columns to include or exclude in `cfg` parameter `SplitConfig` for details.
-
-By default the notebook executes the splitting using settings from `DEFAULT_CFG`, which split at all connectors and LR values from all columns in the input, like this:
 ```python
-split_transportation(spark, sc, input_path, output_path)
+from transportation_splitter import (
+    OvertureTransportationSplitter,
+    SplitConfig,
+    SplitterDataWrangler,
+)
+
+# Initialize the splitter
+splitter = OvertureTransportationSplitter(
+    spark=spark_session,
+    wrangler=SplitterDataWrangler(
+        input_path="path/to/data/*.parquet",
+        output_path="output/"
+    ),
+    cfg=SplitConfig(split_at_connectors=True)
+)
+
+# Run the splitting pipeline
+result_df = splitter.split()
+
+# Or with a spatial filter (uses bbox predicate pushdown for performance)
+result_df = splitter.split(filter_wkt="POLYGON(...)")
 ```
 
+#### Configuration Options
 
-This for example first filter data within the given polygon then would split only at the LR values from column `road_flags`, and will not split at connectors:
+The `SplitConfig` dataclass supports the following options:
+
 ```python
-split_transportation(spark, sc, input_path, output_path, wkt_filter="POLYGON(...)", SplitConfig(split_at_connectors=False, lr_columns_to_include=["road_flags"]))
+SplitConfig(
+    split_at_connectors=True,              # Split at all connectors along the segment
+    lr_columns_to_include=[],              # Only consider these columns for LR splitting
+    lr_columns_to_exclude=[],              # Exclude these columns from LR splitting
+    point_precision=7,                     # Decimal places for split point coordinates
+    lr_split_point_min_dist_meters=0.01,   # Minimum distance between split points (1cm)
+    reuse_existing_intermediate_outputs=True,  # Reuse cached intermediate files
+    write_intermediate_files=True,         # Write intermediate files for caching
+    skip_debug_output=True,                # Skip expensive count()/show() operations
+)
 ```
 
-To improve performance by skipping expensive debug operations like `count()` and `show()` calls, set `skip_debug_output` to `True`:
+**Example: Split only at LR values from specific columns, not at connectors:**
+
 ```python
-split_transportation(spark, sc, input_path, output_path, cfg=SplitConfig(skip_debug_output=True))
+result_df = splitter.split(filter_wkt="POLYGON(...)")
+# With config:
+# SplitConfig(split_at_connectors=False, lr_columns_to_include=["road_flags"])
 ```
 
 If you are using databricks you can also add this repo as a git folder, see instructions [here](https://docs.databricks.com/en/repos/repos-setup.html).
 
+## Planet-Scale Performance Optimizations
+
+This splitter includes several optimizations for processing planet-scale Overture data:
+
+### 1. Bbox Predicate Pushdown
+
+When using `filter_wkt`, the splitter uses the pre-computed `bbox` struct column for efficient filtering:
+
+```python
+# The filter_df function uses bbox fields for Parquet predicate pushdown
+# This allows Spark to skip entire row groups and partition files
+bbox_filter = (
+    (col("bbox.xmin") <= filter_xmax) &
+    (col("bbox.xmax") >= filter_xmin) &
+    (col("bbox.ymin") <= filter_ymax) &
+    (col("bbox.ymax") >= filter_ymin)
+)
+```
+
+This is much faster than computing `ST_Envelope(geometry)` on every row.
+
+### 2. Sedona ST_LengthSpheroid
+
+Segment length is pre-computed using Sedona's native `ST_LengthSpheroid` function before the split UDF runs. This avoids calling Python's pyproj library inside the UDF for every row.
+
+### 3. Shuffle Hash Joins
+
+Joins use `shuffle_hash` hints to prevent broadcast join failures on large datasets:
+
+```python
+segments_df.hint("shuffle_hash").join(connectors_df, ...)
+```
+
+### 4. Cache Invalidation
+
+The pipeline tracks whether upstream steps recomputed data. If a new spatial filter is applied, all downstream cached intermediate files are automatically invalidated and recomputed.
+
 ## Version History
 
-* 0.1
-    * Initial Release
+- 0.2
+  - Refactored to `OvertureTransportationSplitter` class
+  - Added Sedona `ST_LengthSpheroid` optimization
+  - Added bbox predicate pushdown for spatial filtering
+  - Added shuffle_hash join hints for planet-scale processing
+  - Added cache invalidation tracking
+- 0.1
+  - Initial Release

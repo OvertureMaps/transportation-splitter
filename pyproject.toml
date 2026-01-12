@@ -1,25 +1,57 @@
-[tool.poetry]
+[project]
 name = "transportation-splitter"
-version = "0.1.0"
-description = ""
-authors = ["Cozmin Bantea <ibantea@microsoft.com>", "Brad Richardson <bradrichardson@meta.com>"]
+version = "0.2.0"
+description = "Pyspark app for splitting Overture transportation segments to simplify consuming the data"
+authors = [
+    {name = "Cozmin Bantea", email = "ibantea@microsoft.com"},
+    {name = "Brad Richardson", email = "bradrichardson@meta.com"},
+    {name = "Jennings Anderson", email = "jenningsa@meta.com"},
+]
 license = "MIT"
 readme = "README.md"
-
-[tool.poetry.dependencies]
-python = "^3.10"
-pyproj = "^3.6.1"
-pyspark = [
-    # AWS Glue 4.0
-    {version = "3.3.0", python = "3.10"},
-    # Databricks 15.4 LTS (3.5.0), AWS Glue 5.0 (3.5.2)
-    {version = "^3.5", python = "3.11"},
+requires-python = ">=3.10"
+dependencies = [
+    "pyproj>=3.6.1",
+    "pyspark>=3.5,<3.6",
+    "apache-sedona>=1.8,<1.9",
+    "shapely>=2.0",
+    "pandas",
 ]
-apache-sedona = "^1.7"
 
-[tool.poetry.group.test.dependencies]
-pytest = ">=8"
+[dependency-groups]
+dev = [
+    "ruff>=0.8",
+]
+test = [
+    "pyarrow>=22.0.0",
+    "pytest>=8",
+]
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+log_cli = true
+log_cli_level = "INFO"
+log_cli_format = "%(asctime)s [%(levelname)s]: %(message)s"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+    "F405",  # may be undefined from star imports (PySpark idiom)
+    "F403",  # star imports used (PySpark idiom)
+]

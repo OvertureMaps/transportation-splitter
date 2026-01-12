@@ -59,7 +59,7 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be directly
-reported to the Executive Director of the Green Software Foundation at exec@greensoftware.foundation or any community leaders responsible for enforcement.
+reported to the Executive Director of the Green Software Foundation at <exec@greensoftware.foundation> or any community leaders responsible for enforcement.
 
 All complaints will be reviewed and investigated promptly and fairly.
 
