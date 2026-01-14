@@ -56,14 +56,16 @@ transportation-splitter/
 │   └── pipeline.py                  # Main pipeline (OvertureTransportationSplitter class)
 ├── tests/
 │   ├── conftest.py                  # Shared pytest fixtures (spark_session, test data paths)
-│   ├── data/                        # Test parquet files (segment, connector, boulder_*)
+│   ├── data/                        # Test parquet files
+│   │   ├── segment.parquet          # Road segment test data
+│   │   ├── connector.parquet        # Connector point test data
+│   │   ├── boulder_segments.parquet # Boulder, CO segment test data
+│   │   └── boulder_connectors.parquet # Boulder, CO connector test data
 │   ├── unit/                        # Pure Python tests (no Spark)
 │   │   ├── test_split.py            # Segment splitting logic
-│   │   ├── test_apply_lr.py         # Linear reference application
-│   │   └── test_wrangler.py         # SplitterDataWrangler
+│   │   └── test_apply_lr.py         # Linear reference application
 │   └── integration/                 # Tests requiring Spark/Sedona
-│       ├── test_e2e.py              # End-to-end pipeline tests
-│       └── test_profiling.py        # Performance benchmarks and Sedona comparisons
+│       └── test_e2e.py              # End-to-end pipeline tests
 └── .github/workflows/tests.yaml     # CI configuration
 ```
 
