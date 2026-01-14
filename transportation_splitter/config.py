@@ -20,7 +20,7 @@ class SplitConfig:
     """Configuration for the segment splitting process."""
 
     # Controls whether or not to introduce a split on every connector along the segment
-    split_at_connectors: bool = True
+    split_at_connectors: bool = False
 
     # Which columns to explicitly include when looking for 'between' LR values to split at.
     # If left empty all then columns in the input parquet are considered.
