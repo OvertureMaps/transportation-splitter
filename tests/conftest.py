@@ -25,11 +25,6 @@ def get_test_data_path(pattern: str = "{segment,connector}.parquet") -> str:
     return str(TEST_DATA_DIR / pattern)
 
 
-def get_boulder_test_data_path() -> str:
-    """Get the path to Boulder test data files (segments and connectors)."""
-    return str(TEST_DATA_DIR / "boulder_*.parquet")
-
-
 @pytest.fixture(scope="session")
 def spark_session(request):
     """

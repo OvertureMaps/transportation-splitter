@@ -43,10 +43,6 @@ class SplitConfig:
     # set to False to always force reprocess all sub-steps
     reuse_existing_intermediate_outputs: bool = True
 
-    # Whether to write intermediate files during pipeline execution.
-    # Set to False to skip writing intermediate files (faster, but no caching).
-    write_intermediate_files: bool = True
-
     # Skips expensive debug operations like count() and show() calls, default False.
     # Set to True to improve performance by skipping debug output.
     skip_debug_output: bool = True
@@ -55,7 +51,6 @@ class SplitConfig:
         lines = [
             "SplitConfig:",
             f"  split_at_connectors:       {self.split_at_connectors}",
-            f"  write_intermediate_files:  {self.write_intermediate_files}",
             f"  reuse_existing_outputs:    {self.reuse_existing_intermediate_outputs}",
             f"  skip_debug_output:         {self.skip_debug_output}",
             f"  point_precision:           {self.point_precision} decimals",

@@ -114,7 +114,17 @@ splitter = OvertureTransportationSplitter(
 result_df = splitter.split()
 
 # Or with a spatial filter (uses bbox predicate pushdown for performance)
-result_df = splitter.split(filter_wkt="POLYGON(...)")
+# The filter causes intermediate files to use _filtered suffix for cache isolation
+splitter_filtered = OvertureTransportationSplitter(
+    spark=spark_session,
+    wrangler=SplitterDataWrangler(
+        input_path="path/to/data/*.parquet",
+        output_path="output/",
+        filter_wkt="POLYGON(...)"
+    ),
+    cfg=SplitConfig(split_at_connectors=True)
+)
+result_df = splitter_filtered.split()
 ```
 
 #### Configuration Options
@@ -129,8 +139,19 @@ SplitConfig(
     point_precision=7,                     # Decimal places for split point coordinates
     lr_split_point_min_dist_meters=0.01,   # Minimum distance between split points (1cm)
     reuse_existing_intermediate_outputs=True,  # Reuse cached intermediate files
-    write_intermediate_files=True,         # Write intermediate files for caching
     skip_debug_output=True,                # Skip expensive count()/show() operations
+)
+```
+
+The `SplitterDataWrangler` handles I/O configuration:
+
+```python
+SplitterDataWrangler(
+    input_path="path/to/data/*.parquet",   # Input data path (glob patterns supported)
+    output_path="output/",                  # Output directory for results
+    write_intermediate_files=True,          # Write intermediate files for caching
+    compression="zstd",                     # Parquet compression codec
+    block_size=16 * 1024 * 1024,           # Parquet row group size (16MB default)
 )
 ```
 
@@ -177,9 +198,19 @@ Joins use `shuffle_hash` hints to prevent broadcast join failures on large datas
 segments_df.hint("shuffle_hash").join(connectors_df, ...)
 ```
 
-### 4. Cache Invalidation
+### 4. Cache Isolation via Path Suffixes
 
-The pipeline tracks whether upstream steps recomputed data. If a new spatial filter is applied, all downstream cached intermediate files are automatically invalidated and recomputed.
+When `filter_wkt` is set on the wrangler, the output path automatically gets a `_filtered` suffix. This ensures complete cache isolation between filtered and unfiltered runs:
+
+```
+# Unfiltered run (output_path="output/"):
+output/_intermediate/1_spatially_filtered/
+output/_output/
+
+# Filtered run (output_path="output/"):
+output_filtered/_intermediate/1_spatially_filtered/
+output_filtered/_output/
+```
 
 ## Version History
 

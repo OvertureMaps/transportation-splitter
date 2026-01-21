@@ -17,7 +17,9 @@ class SplitterStep(Enum):
     read_input = "input"
     spatial_filter = "1_spatially_filtered"
     joined = "2_joined"
-    raw_split = "3_raw_split"  # Note: this step has no geometry, must use vanilla parquet
+    raw_split = (
+        "3_raw_split"  # Note: this step has no geometry, must use vanilla parquet
+    )
     segment_splits_exploded = "4_segments_splits"
     final_output = "final"
 
@@ -54,11 +56,11 @@ class SplitterDataWrangler:
         ...     output_format=OutputFormat.GEOPARQUET,
         ... )
         >>>
-        >>> # For Parquet output (WKB geometry):
+        >>> # With spatial filter (creates isolated cache at _filtered paths):
         >>> wrangler = SplitterDataWrangler(
         ...     input_path="data/input/*.parquet",
         ...     output_path="data/output/",
-        ...     output_format=OutputFormat.PARQUET_WKB,
+        ...     filter_wkt="POLYGON((...)))",
         ... )
 
     To customize I/O behavior (e.g., for cloud storage), subclass and override
@@ -68,6 +70,10 @@ class SplitterDataWrangler:
     # Required paths
     input_path: str
     output_path: str | None = None  # None = skip final output write
+
+    # Optional spatial filter WKT. When set, only features intersecting this
+    # polygon will be processed. Creates isolated cache paths with _filtered suffix.
+    filter_wkt: str | None = None
 
     # Format options
     input_format: InputFormat = InputFormat.AUTO
@@ -80,6 +86,10 @@ class SplitterDataWrangler:
     compression: str = "zstd"
     block_size: int = 16 * 1024 * 1024  # 16MB row groups
 
+    # Whether to write intermediate files during pipeline execution.
+    # Set to False to skip writing intermediate files (faster, but no caching).
+    write_intermediate_files: bool = True
+
     # Private: computed paths (set in __post_init__)
     _intermediate_path: str = field(init=False, repr=False)
     _final_output_path: str = field(init=False, repr=False)
@@ -89,9 +99,13 @@ class SplitterDataWrangler:
         self.input_path = self.input_path.rstrip("/")
         if self.output_path is not None:
             self.output_path = self.output_path.rstrip("/")
-            self._intermediate_path = f"{self.output_path}/_intermediate"
-            # Final output goes to a subdirectory to avoid overwriting intermediate files
-            self._final_output_path = f"{self.output_path}/_output"
+            # When filter_wkt is set, use _filtered suffix on output path
+            # to isolate all cached data from unfiltered runs
+            base_output = (
+                f"{self.output_path}_filtered" if self.filter_wkt else self.output_path
+            )
+            self._intermediate_path = f"{base_output}/_intermediate"
+            self._final_output_path = f"{base_output}/_output"
         else:
             self._intermediate_path = None
             self._final_output_path = None
@@ -181,7 +195,11 @@ class SplitterDataWrangler:
     # =========================================================================
 
     def _path_for_step(self, step: SplitterStep) -> str:
-        """Get the file path for a given pipeline step."""
+        """Get the file path for a given pipeline step.
+
+        When filter_wkt is set, the parent directories (_intermediate, _output)
+        already have the _filtered suffix applied in __post_init__.
+        """
         if step == SplitterStep.read_input:
             return self.input_path
         elif step == SplitterStep.final_output:
@@ -290,6 +308,7 @@ class SplitterDataWrangler:
             "SplitterDataWrangler:",
             f"  Input:        {self.input_path}",
             f"  Output:       {output_str}",
+            f"  Filter:       {'enabled (paths use _filtered suffix)' if self.filter_wkt else 'none'}",
             f"  Input Format: {self.input_format.value}",
             f"  Output Format:{self.output_format.value}",
             f"  Compression:  {self.compression}",
