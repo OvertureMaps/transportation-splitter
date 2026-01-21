@@ -138,22 +138,30 @@ SplitConfig(
     lr_columns_to_exclude=[],              # Exclude these columns from LR splitting
     point_precision=7,                     # Decimal places for split point coordinates
     lr_split_point_min_dist_meters=0.01,   # Minimum distance between split points (1cm)
-    reuse_existing_intermediate_outputs=True,  # Reuse cached intermediate files
     skip_debug_output=True,                # Skip expensive count()/show() operations
 )
 ```
 
-The `SplitterDataWrangler` handles I/O configuration:
+The `SplitterDataWrangler` handles I/O configuration and state management:
 
 ```python
 SplitterDataWrangler(
     input_path="path/to/data/*.parquet",   # Input data path (glob patterns supported)
     output_path="output/",                  # Output directory for results
+    filter_wkt="POLYGON(...)",              # Optional spatial filter (WKT polygon)
     write_intermediate_files=True,          # Write intermediate files for caching
+    reuse_existing_intermediate_outputs=True,  # Reuse cached intermediate files
     compression="zstd",                     # Parquet compression codec
     block_size=16 * 1024 * 1024,           # Parquet row group size (16MB default)
 )
 ```
+
+The wrangler acts as the "keeper of state" for the pipeline, managing:
+
+- In-memory DataFrame caching via `store()` and `get()` methods
+- Optional disk persistence of intermediate results
+- Geometry type conversion (WKB ↔ GeometryUDT)
+- Cache isolation via path hashing for different filter configurations
 
 **Example: Split only at LR values from specific columns, not at connectors:**
 
@@ -200,16 +208,20 @@ segments_df.hint("shuffle_hash").join(connectors_df, ...)
 
 ### 4. Cache Isolation via Path Suffixes
 
-When `filter_wkt` is set on the wrangler, the output path automatically gets a `_filtered` suffix. This ensures complete cache isolation between filtered and unfiltered runs:
+When `filter_wkt` is set on the wrangler, the output path automatically gets a `_filtered_{hash}` suffix (where hash is an 8-character MD5 of the WKT). This ensures complete cache isolation between different filter polygons:
 
 ```
 # Unfiltered run (output_path="output/"):
 output/_intermediate/1_spatially_filtered/
-output/_output/
+output/split/
 
-# Filtered run (output_path="output/"):
-output_filtered/_intermediate/1_spatially_filtered/
-output_filtered/_output/
+# Filtered run with polygon A:
+output_filtered_a1b2c3d4/_intermediate/1_spatially_filtered/
+output_filtered_a1b2c3d4/split/
+
+# Filtered run with polygon B:
+output_filtered_e5f6g7h8/_intermediate/1_spatially_filtered/
+output_filtered_e5f6g7h8/split/
 ```
 
 ## Version History

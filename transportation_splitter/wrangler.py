@@ -1,5 +1,19 @@
-"""Data wrangling and I/O management for the transportation splitter."""
+"""Data wrangling and I/O management for the transportation splitter.
 
+The SplitterDataWrangler is the central "keeper of state" for the pipeline.
+It manages:
+- In-memory DataFrame caching
+- Optional disk persistence of intermediate results
+- Geometry type conversion (WKB ↔ GeometryUDT)
+- Spatial filtering when filter_wkt is configured
+- Cache isolation via path hashing for different filter configurations
+
+All pipeline interaction with data should go through:
+- wrangler.get(step) - retrieve data (from memory or disk)
+- wrangler.store(step, df) - persist data (to memory and optionally disk)
+"""
+
+import hashlib
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
@@ -12,14 +26,21 @@ logger = logging.getLogger(__name__)
 
 
 class SplitterStep(Enum):
-    """Enumeration of pipeline steps for intermediate file naming."""
+    """Enumeration of pipeline steps for intermediate file naming.
+
+    Each step represents a stage in the splitting pipeline:
+    - read_input: Raw input data (read-only, not stored)
+    - spatial_filter: Data after applying WKT spatial filter (expensive)
+    - joined: Segments joined with connectors (expensive shuffle join)
+    - raw_split: UDF output with split results (most expensive - Python UDF)
+    - segment_splits_exploded: Exploded split segments (convenience cache)
+    - final_output: Final combined output (always written if output_path set)
+    """
 
     read_input = "input"
     spatial_filter = "1_spatially_filtered"
     joined = "2_joined"
-    raw_split = (
-        "3_raw_split"  # Note: this step has no geometry, must use vanilla parquet
-    )
+    raw_split = "3_raw_split"  # Note: no geometry column, uses vanilla parquet
     segment_splits_exploded = "4_segments_splits"
     final_output = "final"
 
@@ -37,31 +58,35 @@ class OutputFormat(Enum):
 
     GEOPARQUET = "geoparquet"  # Native GeoParquet with GeometryType
     PARQUET_WKB = "parquet_wkb"  # Standard Parquet with WKB-encoded geometry
-    MEMORY = "in-memory"  # When there is no output path, DF is returned.
+    DATAFRAME = "dataframe"  # Just return the DF at the end of the split() function
 
 
 @dataclass
 class SplitterDataWrangler:
     """
-    Configuration and I/O operations for the transportation splitter.
+    Configuration, state management, and I/O operations for the transportation splitter.
 
-    This class handles reading input data, writing intermediate files,
-    and writing final output in various formats.
+    This class is the "keeper of state" for the pipeline. It handles:
+    - In-memory DataFrame caching via store() and get()
+    - Optional disk persistence of intermediate results
+    - Geometry type conversion (WKB ↔ GeometryUDT)
+    - Spatial filtering when filter_wkt is configured
+    - Cache isolation via path hashing for different filter configurations
 
     Example:
         >>> wrangler = SplitterDataWrangler(
         ...     input_path="data/input/*.parquet",
         ...     output_path="data/output/",
-        ...     input_format=InputFormat.AUTO,
-        ...     output_format=OutputFormat.GEOPARQUET,
         ... )
         >>>
-        >>> # With spatial filter (creates isolated cache at _filtered paths):
-        >>> wrangler = SplitterDataWrangler(
-        ...     input_path="data/input/*.parquet",
-        ...     output_path="data/output/",
-        ...     filter_wkt="POLYGON((...)))",
-        ... )
+        >>> # Get input (reads from disk, caches in memory)
+        >>> df = wrangler.get(spark, SplitterStep.read_input)
+        >>>
+        >>> # Store result (caches in memory, optionally writes to disk)
+        >>> wrangler.store(SplitterStep.joined, joined_df)
+        >>>
+        >>> # Get cached result (from memory or disk)
+        >>> joined = wrangler.get(spark, SplitterStep.joined)
 
     To customize I/O behavior (e.g., for cloud storage), subclass and override
     the read() and write() methods.
@@ -90,34 +115,253 @@ class SplitterDataWrangler:
     # Set to False to skip writing intermediate files (faster, but no caching).
     write_intermediate_files: bool = True
 
+    # Whether to reuse existing intermediate outputs from disk.
+    # Set to False to always force reprocessing for all sub-steps.
+    reuse_existing_intermediate_outputs: bool = True
+
     # Private: computed paths (set in __post_init__)
     _intermediate_path: str = field(init=False, repr=False)
     _final_output_path: str = field(init=False, repr=False)
+
+    # Private: in-memory state cache for DataFrames
+    _state: dict = field(default_factory=dict, init=False, repr=False)
 
     def __post_init__(self):
         """Normalize paths and compute derived paths."""
         self.input_path = self.input_path.rstrip("/")
         if self.output_path is not None:
             self.output_path = self.output_path.rstrip("/")
-            # When filter_wkt is set, use _filtered suffix on output path
-            # to isolate all cached data from unfiltered runs
-            base_output = (
-                f"{self.output_path}_filtered" if self.filter_wkt else self.output_path
-            )
+            # When filter_wkt is set, add _filtered_{hash} suffix to output path
+            # to isolate cached data for different filters
+            if self.filter_wkt:
+                filter_hash = self._compute_filter_hash(self.filter_wkt)
+                base_output = f"{self.output_path}_filtered_{filter_hash}"
+            else:
+                base_output = self.output_path
             self._intermediate_path = f"{base_output}/_intermediate"
-            self._final_output_path = f"{base_output}/_output"
+            self._final_output_path = f"{base_output}/split"
         else:
             self._intermediate_path = None
             self._final_output_path = None
-            self.output_format = OutputFormat.MEMORY
+            self.output_format = OutputFormat.DATAFRAME
+
+    def _compute_filter_hash(self, wkt: str) -> str:
+        """Compute a short hash of the filter WKT for path isolation.
+
+        Returns an 8-character hex hash that uniquely identifies the filter.
+        """
+        return hashlib.md5(wkt.encode()).hexdigest()[:8]
 
     # =========================================================================
-    # Public API - Override these methods in subclasses for custom I/O
+    # Primary API - store() and get()
+    # =========================================================================
+
+    def store(self, step: SplitterStep, df: DataFrame) -> DataFrame:
+        """Store a DataFrame for a pipeline step.
+
+        This is the primary method for persisting data. It:
+        1. Caches the DataFrame in memory for future get() calls
+        2. Optionally writes to disk based on write_intermediate_files setting
+
+        Geometry conversion is handled by the read/write methods:
+        - GeoParquet: native geometry, no conversion needed
+        - Parquet+WKB: GeometryUDT → WKB on write, WKB → GeometryUDT on read
+
+        Args:
+            step: Pipeline step to store data for
+            df: DataFrame to store
+
+        Returns:
+            The stored DataFrame (same as input, cached in memory)
+        """
+        # Cache in memory
+        self._state[step] = df
+
+        # Determine if we should write to disk
+        should_write = False
+        if step == SplitterStep.final_output:
+            # Always write final output if output_path is configured
+            should_write = self.output_path is not None
+        elif step == SplitterStep.read_input:
+            # Never write input (it's read-only)
+            should_write = False
+        else:
+            # Intermediate steps: write if configured
+            should_write = (
+                self.write_intermediate_files and self.output_path is not None
+            )
+
+        if should_write:
+            self.write(df, step)
+
+        return df
+
+    def get(self, spark: SparkSession, step: SplitterStep) -> DataFrame | None:
+        """Get a DataFrame for a pipeline step.
+
+        This is the primary method for retrieving data. It checks:
+        1. In-memory cache first (fastest)
+        2. Disk cache if reuse_existing_intermediate_outputs is True
+        3. Returns None if data is not available anywhere
+
+        Geometry conversion is handled by the read methods:
+        - GeoParquet: returns GeometryUDT natively
+        - Parquet+WKB: converts WKB → GeometryUDT on read
+
+        Special handling for read_input step:
+        - If filter_wkt is set, returns filtered data (from cache or computed)
+        - If no filter, returns raw input data
+
+        Args:
+            spark: Active SparkSession
+            step: Pipeline step to get data for
+
+        Returns:
+            DataFrame if available, None otherwise
+        """
+        # Special case: read_input handles spatial filtering
+        if step == SplitterStep.read_input:
+            return self._get_input(spark)
+
+        # Check in-memory cache first
+        if step in self._state:
+            return self._state[step]
+
+        # Check disk if configured to reuse
+        if self.reuse_existing_intermediate_outputs and self.check_exists(spark, step):
+            logger.info(f"Reusing existing {step.name} from disk")
+            df = self.read(spark, step)
+            # read() handles geometry conversion for GeoParquet and Parquet+WKB
+            self._state[step] = df
+            return df
+
+        return None
+
+    def _get_input(self, spark: SparkSession) -> DataFrame:
+        """Get input data, applying spatial filter if configured.
+
+        This method handles the read_input step with special logic for filtering:
+        1. If no filter_wkt: just read and return raw input (cached as read_input)
+        2. If filter_wkt is set and reuse is enabled and cache exists: return cached filtered data
+        3. If filter_wkt is set but no cache: read, filter, optionally cache, and return
+
+        The spatial_filter cache is only used when filter_wkt is set.
+
+        Args:
+            spark: Active SparkSession
+
+        Returns:
+            DataFrame with input data (filtered if filter_wkt is set)
+        """
+        # No filter: just read raw input
+        if self.filter_wkt is None:
+            # Check in-memory cache first
+            if SplitterStep.read_input in self._state:
+                return self._state[SplitterStep.read_input]
+            df = self.read(spark, SplitterStep.read_input)
+            self._state[SplitterStep.read_input] = df
+            return df
+
+        # Filter is set - check in-memory cache for filtered data
+        if SplitterStep.spatial_filter in self._state:
+            return self._state[SplitterStep.spatial_filter]
+
+        # Check disk cache for filtered data
+        if self.reuse_existing_intermediate_outputs and self.check_exists(
+            spark, SplitterStep.spatial_filter
+        ):
+            logger.info("Reusing existing spatially filtered data from disk")
+            df = self.read(spark, SplitterStep.spatial_filter)
+            self._state[SplitterStep.spatial_filter] = df
+            return df
+
+        # Need to compute: read raw input and apply filter
+        logger.info(f"Applying spatial filter: {self.filter_wkt[:50]}...")
+        raw_df = self.read(spark, SplitterStep.read_input)
+        filtered_df = self._apply_spatial_filter(raw_df, self.filter_wkt)
+
+        # Store in state as spatial_filter (not read_input)
+        self._state[SplitterStep.spatial_filter] = filtered_df
+
+        # Optionally write filtered data to cache
+        if self.write_intermediate_files and self.output_path is not None:
+            self.write(filtered_df, SplitterStep.spatial_filter)
+
+        return filtered_df
+
+    def _apply_spatial_filter(self, df: DataFrame, filter_wkt: str) -> DataFrame:
+        """Apply a spatial filter to a DataFrame using bbox predicate pushdown.
+
+        Uses the pre-computed bbox struct column for efficient Parquet row group
+        skipping, then applies a precise geometry intersection filter.
+
+        Args:
+            df: DataFrame with geometry and bbox columns
+            filter_wkt: WKT string for the filter polygon
+
+        Returns:
+            DataFrame containing only features that intersect the filter polygon
+        """
+        from pyspark.sql.functions import col
+
+        # Parse filter geometry to get bbox for predicate pushdown
+        from shapely import wkt
+
+        filter_geom = wkt.loads(filter_wkt)
+        filter_minx, filter_miny, filter_maxx, filter_maxy = filter_geom.bounds
+
+        # Apply bbox filter first (enables Parquet predicate pushdown)
+        bbox_filtered = df.filter(
+            (col("bbox.xmin") <= filter_maxx)
+            & (col("bbox.xmax") >= filter_minx)
+            & (col("bbox.ymin") <= filter_maxy)
+            & (col("bbox.ymax") >= filter_miny)
+        )
+
+        # Apply precise geometry intersection filter
+        # Use Sedona's ST_Intersects for accurate filtering
+        return bbox_filtered.filter(
+            expr(f"ST_Intersects(geometry, ST_GeomFromWKT('{filter_wkt}'))")
+        )
+
+    def has(self, spark: SparkSession, step: SplitterStep) -> bool:
+        """Check if a DataFrame is available for a pipeline step.
+
+        Checks both in-memory cache and disk (if reuse is enabled).
+
+        Args:
+            spark: Active SparkSession
+            step: Pipeline step to check
+
+        Returns:
+            True if data is available (in memory or on disk)
+        """
+        if step in self._state:
+            return True
+        if self.reuse_existing_intermediate_outputs and self.check_exists(spark, step):
+            return True
+        return False
+
+    def clear_state(self, step: SplitterStep | None = None) -> None:
+        """Clear in-memory state for a step or all steps.
+
+        Does not delete files from disk.
+
+        Args:
+            step: Specific step to clear, or None to clear all
+        """
+        if step is None:
+            self._state.clear()
+        elif step in self._state:
+            del self._state[step]
+
+    # =========================================================================
+    # Low-level I/O - Override these in subclasses for custom storage
     # =========================================================================
 
     def read(self, spark: SparkSession, step: SplitterStep) -> DataFrame:
         """
-        Read a DataFrame for the given pipeline step.
+        Read a DataFrame for the given pipeline step from disk.
 
         Override this method to customize read behavior (e.g., for cloud storage).
 
@@ -145,7 +389,7 @@ class SplitterDataWrangler:
 
     def write(self, df: DataFrame, step: SplitterStep) -> None:
         """
-        Write a DataFrame for the given pipeline step.
+        Write a DataFrame for the given pipeline step to disk.
 
         Override this method to customize write behavior (e.g., for cloud storage).
         If output_path is None, this method does nothing.
@@ -174,7 +418,7 @@ class SplitterDataWrangler:
 
     def check_exists(self, spark: SparkSession, step: SplitterStep) -> bool:
         """
-        Check if a pipeline step has already been materialized.
+        Check if a pipeline step has already been materialized on disk.
 
         Override this method for custom existence checks (e.g., cloud storage).
 
@@ -197,8 +441,8 @@ class SplitterDataWrangler:
     def _path_for_step(self, step: SplitterStep) -> str:
         """Get the file path for a given pipeline step.
 
-        When filter_wkt is set, the parent directories (_intermediate, _output)
-        already have the _filtered suffix applied in __post_init__.
+        When filter_wkt is set, the base output path already has the _filtered
+        suffix applied in __post_init__.
         """
         if step == SplitterStep.read_input:
             return self.input_path
@@ -303,15 +547,30 @@ class SplitterDataWrangler:
             return False
 
     def __str__(self) -> str:
-        output_str = self.output_path if self.output_path else "(none - in-memory only)"
+        if self.output_path:
+            if self.filter_wkt:
+                filter_hash = self._compute_filter_hash(self.filter_wkt)
+                filter_str = f"enabled (hash: {filter_hash})"
+            else:
+                filter_str = "none"
+            intermediate_str = self._intermediate_path
+            output_str = self._final_output_path
+        else:
+            filter_str = "none"
+            intermediate_str = "(none - in-memory only)"
+            output_str = "(none - in-memory only)"
+
         lines = [
             "SplitterDataWrangler:",
-            f"  Input:        {self.input_path}",
-            f"  Output:       {output_str}",
-            f"  Filter:       {'enabled (paths use _filtered suffix)' if self.filter_wkt else 'none'}",
-            f"  Input Format: {self.input_format.value}",
-            f"  Output Format:{self.output_format.value}",
-            f"  Compression:  {self.compression}",
-            f"  Block Size:   {self.block_size // (1024 * 1024)}MB",
+            f"  Input:              {self.input_path}",
+            f"  Intermediate:       {intermediate_str}",
+            f"  Output:             {output_str}",
+            f"  Filter:             {filter_str}",
+            f"  Input Format:       {self.input_format.value}",
+            f"  Output Format:      {self.output_format.value}",
+            f"  Write Intermediate: {self.write_intermediate_files}",
+            f"  Reuse Existing:     {self.reuse_existing_intermediate_outputs}",
+            f"  Compression:        {self.compression}",
+            f"  Block Size:         {self.block_size // (1024 * 1024)}MB",
         ]
         return "\n".join(lines)

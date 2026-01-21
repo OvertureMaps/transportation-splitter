@@ -39,10 +39,6 @@ class SplitConfig:
     # for us to create a new connector for them instead of using the existing connector.
     lr_split_point_min_dist_meters: float = 0.01  # 1cm
 
-    # Skips steps for which intermediate streams are found, default True,
-    # set to False to always force reprocess all sub-steps
-    reuse_existing_intermediate_outputs: bool = True
-
     # Skips expensive debug operations like count() and show() calls, default False.
     # Set to True to improve performance by skipping debug output.
     skip_debug_output: bool = True
@@ -51,7 +47,6 @@ class SplitConfig:
         lines = [
             "SplitConfig:",
             f"  split_at_connectors:       {self.split_at_connectors}",
-            f"  reuse_existing_outputs:    {self.reuse_existing_intermediate_outputs}",
             f"  skip_debug_output:         {self.skip_debug_output}",
             f"  point_precision:           {self.point_precision} decimals",
             f"  lr_min_dist:               {self.lr_split_point_min_dist_meters * 100:.1f}cm",
