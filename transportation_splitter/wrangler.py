@@ -122,8 +122,12 @@ class SplitterDataWrangler:
     reuse_existing_intermediate_outputs: bool = True
 
     # Private: computed paths (set in __post_init__)
+    _base_output_path: str = field(init=False, repr=False)
     _intermediate_path: str = field(init=False, repr=False)
     _final_output_path: str = field(init=False, repr=False)
+
+    # Private: filter hash for path isolation (set in __post_init__)
+    _filter_hash: str | None = field(init=False, repr=False)
 
     # Private: in-memory state cache for DataFrames
     _state: dict = field(default_factory=dict, init=False, repr=False)
@@ -133,18 +137,25 @@ class SplitterDataWrangler:
         self.input_path = self.input_path.rstrip("/")
         if self.output_path is not None:
             self.output_path = self.output_path.rstrip("/")
-            # When filter_wkt is set, add _filtered_{hash} suffix to output path
-            # to isolate cached data for different filters
+            # When filter_wkt is set, add _filtered suffix and compute hash
+            # The base output path gets _filtered, and each folder gets the hash
             if self.filter_wkt:
-                filter_hash = self._compute_filter_hash(self.filter_wkt)
-                base_output = f"{self.output_path}_filtered_{filter_hash}"
+                self._filter_hash = self._compute_filter_hash(self.filter_wkt)
+                self._base_output_path = f"{self.output_path}_filtered"
             else:
-                base_output = self.output_path
-            self._intermediate_path = f"{base_output}/_intermediate"
-            self._final_output_path = f"{base_output}/split"
+                self._filter_hash = None
+                self._base_output_path = self.output_path
+            # Apply hash suffix to folder names when filtered
+            if self._filter_hash:
+                self._intermediate_path = f"{self._base_output_path}/_intermediate_{self._filter_hash}"
+                self._final_output_path = f"{self._base_output_path}/split_{self._filter_hash}"
+            else:
+                self._intermediate_path = f"{self.output_path}/_intermediate"
+                self._final_output_path = f"{self.output_path}/split"
         else:
             self._intermediate_path = None
             self._final_output_path = None
+            self._filter_hash = None
             self.output_format = OutputFormat.DATAFRAME
 
     def _compute_filter_hash(self, wkt: str) -> str:
@@ -189,9 +200,7 @@ class SplitterDataWrangler:
             should_write = False
         else:
             # Intermediate steps: write if configured
-            should_write = (
-                self.write_intermediate_files and self.output_path is not None
-            )
+            should_write = self.write_intermediate_files and self.output_path is not None
 
         if should_write:
             self.write(df, step)
@@ -269,9 +278,7 @@ class SplitterDataWrangler:
             return self._state[SplitterStep.spatial_filter]
 
         # Check disk cache for filtered data
-        if self.reuse_existing_intermediate_outputs and self.check_exists(
-            spark, SplitterStep.spatial_filter
-        ):
+        if self.reuse_existing_intermediate_outputs and self.check_exists(spark, SplitterStep.spatial_filter):
             logger.info("Reusing existing spatially filtered data from disk")
             df = self.read(spark, SplitterStep.spatial_filter)
             self._state[SplitterStep.spatial_filter] = df
@@ -305,10 +312,14 @@ class SplitterDataWrangler:
             DataFrame containing only features that intersect the filter polygon
         """
         from pyspark.sql.functions import col
-
-        # Parse filter geometry to get bbox for predicate pushdown
         from shapely import wkt
 
+        from transportation_splitter.geometry import sanitize_wkt
+
+        # Sanitize the WKT to handle invalid characters and escape quotes
+        sanitized_wkt = sanitize_wkt(filter_wkt)
+
+        # Parse filter geometry to get bbox for predicate pushdown
         filter_geom = wkt.loads(filter_wkt)
         filter_minx, filter_miny, filter_maxx, filter_maxy = filter_geom.bounds
 
@@ -322,40 +333,7 @@ class SplitterDataWrangler:
 
         # Apply precise geometry intersection filter
         # Use Sedona's ST_Intersects for accurate filtering
-        return bbox_filtered.filter(
-            expr(f"ST_Intersects(geometry, ST_GeomFromWKT('{filter_wkt}'))")
-        )
-
-    def has(self, spark: SparkSession, step: SplitterStep) -> bool:
-        """Check if a DataFrame is available for a pipeline step.
-
-        Checks both in-memory cache and disk (if reuse is enabled).
-
-        Args:
-            spark: Active SparkSession
-            step: Pipeline step to check
-
-        Returns:
-            True if data is available (in memory or on disk)
-        """
-        if step in self._state:
-            return True
-        if self.reuse_existing_intermediate_outputs and self.check_exists(spark, step):
-            return True
-        return False
-
-    def clear_state(self, step: SplitterStep | None = None) -> None:
-        """Clear in-memory state for a step or all steps.
-
-        Does not delete files from disk.
-
-        Args:
-            step: Specific step to clear, or None to clear all
-        """
-        if step is None:
-            self._state.clear()
-        elif step in self._state:
-            del self._state[step]
+        return bbox_filtered.filter(expr(f"ST_Intersects(geometry, ST_GeomFromWKT('{sanitized_wkt}'))"))
 
     # =========================================================================
     # Low-level I/O - Override these in subclasses for custom storage
@@ -443,18 +421,19 @@ class SplitterDataWrangler:
     def _path_for_step(self, step: SplitterStep) -> str:
         """Get the file path for a given pipeline step.
 
-        When filter_wkt is set, the base output path already has the _filtered
-        suffix applied in __post_init__.
+        Filter hash is applied to all folders (intermediate, debug, split)
+        when filter_wkt is set. The base output path also gets _filtered suffix.
         """
         if step == SplitterStep.read_input:
             return self.input_path
         elif step == SplitterStep.final_output:
             return self._final_output_path
         elif step == SplitterStep.debug:
-            # Debug goes at the same level as _intermediate (in base output dir)
-            # e.g., output/_debug instead of output/_intermediate/_debug
-            base_output = self._intermediate_path.rsplit("/_intermediate", 1)[0]
-            return f"{base_output}/{step.value}"
+            # Debug goes at same level as _intermediate with hash suffix if filtered
+            if self._filter_hash:
+                return f"{self._base_output_path}/_debug_{self._filter_hash}"
+            else:
+                return f"{self._base_output_path}/_debug"
         else:
             return f"{self._intermediate_path}/{step.value}"
 
@@ -586,9 +565,8 @@ class SplitterDataWrangler:
 
     def __str__(self) -> str:
         if self.output_path:
-            if self.filter_wkt:
-                filter_hash = self._compute_filter_hash(self.filter_wkt)
-                filter_str = f"enabled (hash: {filter_hash})"
+            if self._filter_hash:
+                filter_str = f"enabled (hash: {self._filter_hash})"
             else:
                 filter_str = "none"
             intermediate_str = self._intermediate_path

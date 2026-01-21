@@ -2,7 +2,6 @@
 
 import logging
 
-from pyspark.sql import Row
 from tests.conftest import get_test_data_path
 from transportation_splitter import (
     OvertureTransportationSplitter,
@@ -47,15 +46,11 @@ def test_boulder_data_split(spark_session):
 
     # Verify all segments have exactly 2 connectors (start and end)
     segments_with_connector_count = (
-        result_df.filter("type = 'segment'")
-        .selectExpr("id", "size(connectors) as connector_count")
-        .collect()
+        result_df.filter("type = 'segment'").selectExpr("id", "size(connectors) as connector_count").collect()
     )
 
     for row in segments_with_connector_count:
-        assert (
-            row.connector_count >= 2
-        ), f"Segment {row.id} has {row.connector_count} connectors, expected >= 2"
+        assert row.connector_count >= 2, f"Segment {row.id} has {row.connector_count} connectors, expected >= 2"
 
     # Verify start_lr and end_lr are present and valid
     lr_check = (
@@ -67,13 +62,9 @@ def test_boulder_data_split(spark_session):
     for row in lr_check:
         assert row.start_lr is not None, f"Segment {row.id} has null start_lr"
         assert row.end_lr is not None, f"Segment {row.id} has null end_lr"
-        assert (
-            row.start_lr >= 0.0
-        ), f"Segment {row.id} has invalid start_lr: {row.start_lr}"
+        assert row.start_lr >= 0.0, f"Segment {row.id} has invalid start_lr: {row.start_lr}"
         assert row.end_lr <= 1.0, f"Segment {row.id} has invalid end_lr: {row.end_lr}"
-        assert (
-            row.lr_span > 0
-        ), f"Segment {row.id} has non-positive lr_span: {row.lr_span}"
+        assert row.lr_span > 0, f"Segment {row.id} has non-positive lr_span: {row.lr_span}"
 
     logger.info(f"[BOULDER] All {segment_count} segments validated successfully")
 
@@ -105,29 +96,23 @@ def test_boulder_data_split_with_filter(spark_session):
     segment_count = result_df.filter("type = 'segment'").count()
     connector_count = result_df.filter("type = 'connector'").count()
 
-    logger.info(
-        f"\n[BOULDER-FILTERED] Segments: {segment_count}, Connectors: {connector_count}"
-    )
+    logger.info(f"\n[BOULDER-FILTERED] Segments: {segment_count}, Connectors: {connector_count}")
 
     # Verify we got results
-    assert (
-        segment_count > 0 and segment_count < 10000
-    ), "Expected at least one segment in Boulder data, but fewer than in the full dataset"
-    assert (
-        connector_count > 0 and connector_count < 10000
-    ), "Expected at least one connector in Boulder data, but fewer than in the full dataset"
+    assert segment_count > 0 and segment_count < 10000, (
+        "Expected at least one segment in Boulder data, but fewer than in the full dataset"
+    )
+    assert connector_count > 0 and connector_count < 10000, (
+        "Expected at least one connector in Boulder data, but fewer than in the full dataset"
+    )
 
     # Verify all segments have exactly 2 connectors (start and end)
     segments_with_connector_count = (
-        result_df.filter("type = 'segment'")
-        .selectExpr("id", "size(connectors) as connector_count")
-        .collect()
+        result_df.filter("type = 'segment'").selectExpr("id", "size(connectors) as connector_count").collect()
     )
 
     for row in segments_with_connector_count:
-        assert (
-            row.connector_count >= 2
-        ), f"Segment {row.id} has {row.connector_count} connectors, expected >= 2"
+        assert row.connector_count >= 2, f"Segment {row.id} has {row.connector_count} connectors, expected >= 2"
 
     # Verify start_lr and end_lr are present and valid
     lr_check = (
@@ -139,17 +124,11 @@ def test_boulder_data_split_with_filter(spark_session):
     for row in lr_check:
         assert row.start_lr is not None, f"Segment {row.id} has null start_lr"
         assert row.end_lr is not None, f"Segment {row.id} has null end_lr"
-        assert (
-            row.start_lr >= 0.0
-        ), f"Segment {row.id} has invalid start_lr: {row.start_lr}"
+        assert row.start_lr >= 0.0, f"Segment {row.id} has invalid start_lr: {row.start_lr}"
         assert row.end_lr <= 1.0, f"Segment {row.id} has invalid end_lr: {row.end_lr}"
-        assert (
-            row.lr_span > 0
-        ), f"Segment {row.id} has non-positive lr_span: {row.lr_span}"
+        assert row.lr_span > 0, f"Segment {row.id} has non-positive lr_span: {row.lr_span}"
 
-    logger.info(
-        f"[BOULDER-FILTERED] All {segment_count} segments validated successfully"
-    )
+    logger.info(f"[BOULDER-FILTERED] All {segment_count} segments validated successfully")
 
 
 # def test_boulder_data_split_with_filter_reuse_existing(spark_session):

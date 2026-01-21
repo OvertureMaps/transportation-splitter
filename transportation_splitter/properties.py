@@ -112,17 +112,3 @@ def _destination_applies(
         return False
 
     return True
-
-
-# Keep the old function name as an alias for backward compatibility
-def destination_applies_to_split_connectors(d: dict, connectors: list[dict]) -> bool:
-    """Check if a destination applies to the given split connectors."""
-    if not connectors or len(connectors) != 2:
-        return False
-    connector_ids = {c["connector_id"] for c in connectors}
-    return _destination_applies(
-        d,
-        connector_ids,
-        connectors[1]["connector_id"],
-        connectors[0]["connector_id"],
-    )
