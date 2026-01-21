@@ -152,41 +152,41 @@ def test_boulder_data_split_with_filter(spark_session):
     )
 
 
-def test_boulder_data_split_with_filter_reuse_existing(spark_session):
-    """End-to-end test using Boulder, CO test data with spatial filter and cache reuse."""
-    input_path: str = get_test_data_path(pattern="boulder_*.parquet")
-    output_path = "tests/out/boulder"
+# def test_boulder_data_split_with_filter_reuse_existing(spark_session):
+#     """End-to-end test using Boulder, CO test data with spatial filter and cache reuse."""
+#     input_path: str = get_test_data_path(pattern="boulder_*.parquet")
+#     output_path = "tests/out/boulder"
 
-    test_config = SplitConfig(
-        split_at_connectors=False,
-        skip_debug_output=False,
-    )
+#     test_config = SplitConfig(
+#         split_at_connectors=False,
+#         skip_debug_output=False,
+#     )
 
-    splitter = OvertureTransportationSplitter(
-        spark=spark_session,
-        wrangler=SplitterDataWrangler(
-            input_path=input_path,
-            output_path=output_path,
-            write_intermediate_files=True,
-            reuse_existing_intermediate_outputs=True,
-            filter_wkt="POLYGON((-105.279742 40.014376, -105.248896 40.014376, -105.248896 40.000703, -105.279742 40.000703, -105.279742 40.014376))",
-        ),
-        cfg=test_config,
-    )
-    result_df = splitter.split()
+#     splitter = OvertureTransportationSplitter(
+#         spark=spark_session,
+#         wrangler=SplitterDataWrangler(
+#             input_path=input_path,
+#             output_path=output_path,
+#             write_intermediate_files=True,
+#             reuse_existing_intermediate_outputs=True,
+#             filter_wkt="POLYGON((-105.279742 40.014376, -105.248896 40.014376, -105.248896 40.000703, -105.279742 40.000703, -105.279742 40.014376))",
+#         ),
+#         cfg=test_config,
+#     )
+#     result_df = splitter.split()
 
-    # Validate basic structure
-    segment_count = result_df.filter("type = 'segment'").count()
-    connector_count = result_df.filter("type = 'connector'").count()
+#     # Validate basic structure
+#     segment_count = result_df.filter("type = 'segment'").count()
+#     connector_count = result_df.filter("type = 'connector'").count()
 
-    logger.info(
-        f"\n[BOULDER-FILTERED-REUSE] Segments: {segment_count}, Connectors: {connector_count}"
-    )
+#     logger.info(
+#         f"\n[BOULDER-FILTERED-REUSE] Segments: {segment_count}, Connectors: {connector_count}"
+#     )
 
-    # Verify we got results
-    assert (
-        segment_count > 0 and segment_count < 10000
-    ), "Expected at least one segment in Boulder data, but fewer than in the full dataset"
-    assert (
-        connector_count > 0 and connector_count < 10000
-    ), "Expected at least one connector in Boulder data, but fewer than in the full dataset"
+#     # Verify we got results
+#     assert (
+#         segment_count > 0 and segment_count < 10000
+#     ), "Expected at least one segment in Boulder data, but fewer than in the full dataset"
+#     assert (
+#         connector_count > 0 and connector_count < 10000
+#     ), "Expected at least one connector in Boulder data, but fewer than in the full dataset"

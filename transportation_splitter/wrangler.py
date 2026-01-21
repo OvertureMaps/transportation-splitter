@@ -34,6 +34,7 @@ class SplitterStep(Enum):
     - joined: Segments joined with connectors (expensive shuffle join)
     - raw_split: UDF output with split results (most expensive - Python UDF)
     - segment_splits_exploded: Exploded split segments (convenience cache)
+    - debug: Debug output with length comparison per segment
     - final_output: Final combined output (always written if output_path set)
     """
 
@@ -42,6 +43,7 @@ class SplitterStep(Enum):
     joined = "2_joined"
     raw_split = "3_raw_split"  # Note: no geometry column, uses vanilla parquet
     segment_splits_exploded = "4_segments_splits"
+    debug = "_debug"
     final_output = "final"
 
 
@@ -405,8 +407,8 @@ class SplitterDataWrangler:
         write_path = self._path_for_step(step)
         logger.info(f"Writing {step.name} to {write_path}")
 
-        if step == SplitterStep.raw_split:
-            # raw_split has no geometry, must use vanilla Parquet
+        if step == SplitterStep.raw_split or step == SplitterStep.debug:
+            # raw_split and debug have no geometry, must use vanilla Parquet
             self._write_parquet(df, write_path)
         elif self.output_format == OutputFormat.GEOPARQUET:
             # Use GeoParquet for both intermediate and final output
@@ -448,6 +450,11 @@ class SplitterDataWrangler:
             return self.input_path
         elif step == SplitterStep.final_output:
             return self._final_output_path
+        elif step == SplitterStep.debug:
+            # Debug goes at the same level as _intermediate (in base output dir)
+            # e.g., output/_debug instead of output/_intermediate/_debug
+            base_output = self._intermediate_path.rsplit("/_intermediate", 1)[0]
+            return f"{base_output}/{step.value}"
         else:
             return f"{self._intermediate_path}/{step.value}"
 
@@ -481,8 +488,14 @@ class SplitterDataWrangler:
             return False
 
     def _read_geoparquet(self, spark: SparkSession, path: str) -> DataFrame:
-        """Read a native GeoParquet file."""
-        return spark.read.format("geoparquet").option("mergeSchema", "true").load(path)
+        """Read a native GeoParquet file.
+
+        Ensures the geometry column is returned as GeometryUDT. If the file
+        was written without proper GeoParquet metadata, we fall back to parsing
+        the geometry column as WKB.
+        """
+        df = spark.read.format("geoparquet").option("mergeSchema", "true").load(path)
+        return self._ensure_geometry_udt(df)
 
     def _read_parquet_wkb(self, spark: SparkSession, path: str) -> DataFrame:
         """Read a Parquet file with WKB-encoded geometry."""
@@ -545,6 +558,31 @@ class SplitterDataWrangler:
             return True
         except AnalysisException:
             return False
+
+    def _ensure_geometry_udt(self, df: DataFrame) -> DataFrame:
+        """Ensure the geometry column is GeometryUDT, not BinaryType.
+
+        When reading GeoParquet files that may have been written without proper
+        GeoParquet metadata (or when Spark reads geometry as binary), this
+        converts WKB binary to GeometryUDT.
+
+        Args:
+            df: DataFrame that may have geometry as BinaryType or GeometryUDT
+
+        Returns:
+            DataFrame with geometry column guaranteed to be GeometryUDT
+        """
+        from pyspark.sql.types import BinaryType
+
+        geom_col = self.geometry_column
+        if geom_col not in df.columns:
+            return df
+
+        geom_type = df.schema[geom_col].dataType
+        if isinstance(geom_type, BinaryType):
+            logger.debug(f"Converting {geom_col} from BinaryType to GeometryUDT")
+            return df.withColumn(geom_col, expr(f"ST_GeomFromWKB({geom_col})"))
+        return df
 
     def __str__(self) -> str:
         if self.output_path:

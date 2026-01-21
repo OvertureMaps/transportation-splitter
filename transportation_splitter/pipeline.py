@@ -9,6 +9,7 @@ from pyspark.sql import functions as F
 from pyspark.sql.functions import col, lit, size, struct, udf
 from pyspark.sql.types import (
     ArrayType,
+    BinaryType,
     BooleanType,
     DoubleType,
     Row,
@@ -72,6 +73,11 @@ class OvertureTransportationSplitter:
     The result is a transportation dataset where segments have exactly two connectors
     (one at each end) and no linear references.
 
+    Attributes:
+        debug_df: When skip_debug_output is False, contains debug info comparing
+                  original segment lengths to split segment lengths. None if
+                  skip_debug_output is True or split() hasn't been called.
+
     Example:
         >>> from transportation_splitter import (
         ...     OvertureTransportationSplitter,
@@ -102,6 +108,9 @@ class OvertureTransportationSplitter:
         ...     cfg=SplitConfig(split_at_connectors=True)
         ... )
         >>> result_df = splitter.split()
+        >>>
+        >>> # Access debug info (if skip_debug_output=False)
+        >>> debug_df = splitter.debug_df
     """
 
     def __init__(
@@ -122,6 +131,7 @@ class OvertureTransportationSplitter:
         self.sc = spark.sparkContext
         self.wrangler = wrangler
         self.cfg = cfg
+        self.debug_df: DataFrame | None = None
 
     def split(self) -> DataFrame:
         """
@@ -392,6 +402,17 @@ class OvertureTransportationSplitter:
         )
         if cached_splits is not None:
             final_segments_df = cached_splits
+            # When segment_splits_exploded is read from disk cache, geometry may come back
+            # as BinaryType instead of GeometryUDT. Convert to ensure schema compatibility.
+            if "geometry" in final_segments_df.columns:
+                geom_type = final_segments_df.schema["geometry"].dataType
+                if isinstance(geom_type, BinaryType):
+                    logger.debug(
+                        "Converting final_segments geometry from BinaryType to GeometryUDT"
+                    )
+                    final_segments_df = final_segments_df.withColumn(
+                        "geometry", F.expr("ST_GeomFromWKB(geometry)")
+                    )
         else:
             # Need to compute
             exploded_df = flat_df.withColumn(
@@ -412,8 +433,17 @@ class OvertureTransportationSplitter:
             .select("connector.*")
         )
 
-        # Ensure geometry type consistency
-        # added_connectors_df = ensure_geometry_udt(added_connectors_df)
+        # When raw_split is read from disk cache, nested geometry fields come back
+        # as BinaryType instead of GeometryUDT. Convert to ensure schema compatibility.
+        if "geometry" in added_connectors_df.columns:
+            geom_type = added_connectors_df.schema["geometry"].dataType
+            if isinstance(geom_type, BinaryType):
+                logger.debug(
+                    "Converting added_connectors geometry from BinaryType to GeometryUDT"
+                )
+                added_connectors_df = added_connectors_df.withColumn(
+                    "geometry", F.expr("ST_GeomFromWKB(geometry)")
+                )
 
         # Combine with existing connectors
         all_connectors_df = (
@@ -468,4 +498,152 @@ class OvertureTransportationSplitter:
                 f"Aggregated metrics: {[(row.key, row.value, row.value_count) for row in metrics]}"
             )
 
+            # Create debug output comparing original vs split segment lengths
+            self._create_debug_output(final_df, filtered_df, split_df)
+
         return final_df
+
+    def _create_debug_output(
+        self, final_df: DataFrame, filtered_df: DataFrame, split_df: DataFrame
+    ) -> None:
+        """Create debug DataFrame comparing original segment lengths to split results.
+
+        The debug DataFrame contains one row per original segment with:
+        - id: Original segment ID
+        - original_length: Length of original segment (meters)
+        - num_split_segments: Number of segments after splitting
+        - sum_split_lengths: Total length of all split segments (meters)
+        - length_diff: Difference between original and sum of splits (should be ~0)
+        - lr_ranges: Sorted list of (start_lr, end_lr) tuples for each split segment
+        - has_self_intersecting: Whether any split segment is self-intersecting
+        - original_self_intersecting: Whether original segment was self-intersecting
+        - is_success: Whether the split UDF succeeded
+        - error_message: Error message if split failed
+        - debug_messages: Debug messages from the UDF
+        - elapsed: Time taken by the split UDF (seconds)
+        - udf_length_diff: Length difference computed by the UDF
+
+        The result is stored in self.debug_df and optionally written to disk
+        at the _debug path if output_path is configured.
+
+        Args:
+            final_df: Final output DataFrame with split segments and connectors
+            filtered_df: Original filtered DataFrame (for computing original lengths)
+            split_df: Raw split UDF output DataFrame with success/error info
+        """
+        # Get original segment lengths
+        original_segments = filtered_df.filter("type == 'segment'").select(
+            F.col("id").alias("original_id"),
+            F.expr("ST_LengthSpheroid(geometry)").alias("original_length"),
+        )
+
+        # Get split segments from final_df (segments have start_lr and end_lr)
+        # Filter to only segments (not connectors) and compute lengths
+        # Note: All split segments from the same original keep the same ID,
+        # distinguished only by start_lr/end_lr values
+        split_segments = final_df.filter("type == 'segment'").select(
+            F.col("id").alias("segment_id"),
+            F.col("start_lr"),
+            F.col("end_lr"),
+            F.expr("ST_LengthSpheroid(geometry)").alias("split_length"),
+            # Extract self-intersecting flags from metrics map
+            F.when(
+                F.col("metrics").getItem("original_self_intersecting") == "true",
+                F.lit(True),
+            )
+            .otherwise(F.lit(False))
+            .alias("original_self_intersecting"),
+            F.when(
+                F.col("metrics").getItem("split_self_intersecting") == "true",
+                F.lit(True),
+            )
+            .otherwise(F.lit(False))
+            .alias("split_self_intersecting"),
+        )
+
+        # Aggregate by segment_id to get sum of lengths and lr_ranges
+        split_info = split_segments.groupBy("segment_id").agg(
+            F.count("*").alias("num_split_segments"),
+            F.sum("split_length").alias("sum_split_lengths"),
+            # Collect lr_ranges and sort by start_lr using array_sort
+            F.array_sort(
+                F.collect_list(
+                    F.struct(
+                        F.col("start_lr"),
+                        F.col("end_lr"),
+                    )
+                )
+            ).alias("lr_ranges"),
+            # Track if any split segment is self-intersecting
+            F.max("split_self_intersecting").alias("has_self_intersecting"),
+            # Original self-intersecting flag (same for all splits of same segment)
+            F.max("original_self_intersecting").alias("original_self_intersecting"),
+        )
+
+        # Get UDF output info (one row per original segment)
+        udf_info = split_df.select(
+            F.col("id").alias("udf_segment_id"),
+            F.col("split_result.is_success").alias("is_success"),
+            F.col("split_result.error_message").alias("error_message"),
+            F.col("split_result.debug_messages").alias("debug_messages"),
+            F.col("split_result.exception_traceback").alias("exception_traceback"),
+            F.col("split_result.elapsed").alias("elapsed"),
+            F.col("split_result.length_before_split").alias("udf_length_before"),
+            F.col("split_result.length_after_split").alias("udf_length_after"),
+            F.col("split_result.length_diff").alias("udf_length_diff"),
+        )
+
+        # Join original segments with split info and UDF info
+        debug_df = (
+            original_segments.join(
+                split_info,
+                original_segments.original_id == split_info.segment_id,
+                "left",
+            )
+            .join(
+                udf_info,
+                original_segments.original_id == udf_info.udf_segment_id,
+                "left",
+            )
+            .select(
+                F.col("original_id").alias("id"),
+                F.col("original_length"),
+                F.coalesce(F.col("num_split_segments"), F.lit(0)).alias(
+                    "num_split_segments"
+                ),
+                F.coalesce(F.col("sum_split_lengths"), F.lit(0.0)).alias(
+                    "sum_split_lengths"
+                ),
+                (
+                    F.col("original_length")
+                    - F.coalesce(F.col("sum_split_lengths"), F.lit(0.0))
+                ).alias("length_diff"),
+                F.col("lr_ranges"),
+                F.coalesce(F.col("original_self_intersecting"), F.lit(False)).alias(
+                    "original_self_intersecting"
+                ),
+                F.coalesce(F.col("has_self_intersecting"), F.lit(False)).alias(
+                    "has_self_intersecting"
+                ),
+                # UDF output fields
+                F.coalesce(F.col("is_success"), F.lit(False)).alias("is_success"),
+                F.col("error_message"),
+                F.col("debug_messages"),
+                F.col("exception_traceback"),
+                F.col("elapsed"),
+                F.col("udf_length_before"),
+                F.col("udf_length_after"),
+                F.col("udf_length_diff"),
+            )
+        )
+
+        # Store in instance attribute
+        self.debug_df = debug_df
+
+        # Optionally store to disk via wrangler
+        if (
+            self.wrangler.output_path is not None
+            and self.wrangler.write_intermediate_files
+        ):
+            # Use store() which handles writing to the debug path
+            self.wrangler.store(SplitterStep.debug, debug_df)
