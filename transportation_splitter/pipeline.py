@@ -392,6 +392,14 @@ class OvertureTransportationSplitter:
             )
             flat_splits_df = exploded_df.select("*", "split_segment_row.*")
 
+            # When raw_split is read from disk cache, nested geometry fields come back
+            # as BinaryType instead of GeometryUDT. Convert to ensure schema compatibility.
+            if "geometry" in flat_splits_df.columns:
+                geom_type = flat_splits_df.schema["geometry"].dataType
+                if isinstance(geom_type, BinaryType):
+                    logger.debug("Converting segment splits geometry from BinaryType to GeometryUDT")
+                    flat_splits_df = flat_splits_df.withColumn("geometry", F.expr("ST_GeomFromWKB(geometry)"))
+
             # Store the result
             final_segments_df = self.wrangler.store(SplitterStep.segment_splits_exploded, flat_splits_df)
 
