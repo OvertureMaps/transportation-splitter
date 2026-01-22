@@ -372,6 +372,13 @@ class OvertureTransportationSplitter:
             The final output is always regenerated (not reused from cache).
             Only intermediate outputs are cached for convenience.
         """
+        # Ensure filtered_df has GeometryUDT (may be BinaryType if read from Parquet+WKB cache)
+        if "geometry" in filtered_df.columns:
+            geom_type = filtered_df.schema["geometry"].dataType
+            if isinstance(geom_type, BinaryType):
+                logger.debug("Converting filtered_df geometry from BinaryType to GeometryUDT")
+                filtered_df = filtered_df.withColumn("geometry", F.expr("ST_GeomFromWKB(geometry)"))
+
         flat_df = split_df.select("input_segment", "split_result.*")
 
         # Try to get cached segment splits

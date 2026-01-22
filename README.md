@@ -107,7 +107,7 @@ splitter = OvertureTransportationSplitter(
         input_path="path/to/data/*.parquet",
         output_path="output/"
     ),
-    cfg=SplitConfig(split_at_connectors=True)
+    cfg=SplitConfig()  # Uses defaults: split_at_connectors=False
 )
 
 # Run the splitting pipeline
@@ -129,26 +129,35 @@ result_df = splitter_filtered.split()
 
 #### Configuration Options
 
-The `SplitConfig` dataclass supports the following options:
+The `SplitConfig` dataclass controls the splitting behavior:
 
 ```python
 SplitConfig(
-    split_at_connectors=True,              # Split at all connectors along the segment
+    split_at_connectors=False,             # Split at all connectors along the segment (default: False)
     lr_columns_to_include=[],              # Only consider these columns for LR splitting
     lr_columns_to_exclude=[],              # Exclude these columns from LR splitting
     point_precision=7,                     # Decimal places for split point coordinates
     lr_split_point_min_dist_meters=0.01,   # Minimum distance between split points (1cm)
-    skip_debug_output=True,                # Skip expensive count()/show() operations
+    skip_debug_output=True,                # Skip expensive count()/show() operations (default: True)
 )
 ```
 
 The `SplitterDataWrangler` handles I/O configuration and state management:
 
 ```python
+from transportation_splitter import (
+    SplitterDataWrangler,
+    InputFormat,
+    OutputFormat,
+)
+
 SplitterDataWrangler(
     input_path="path/to/data/*.parquet",   # Input data path (glob patterns supported)
-    output_path="output/",                  # Output directory for results
+    output_path="output/",                  # Output directory for results (None = in-memory only)
     filter_wkt="POLYGON(...)",              # Optional spatial filter (WKT polygon)
+    input_format=InputFormat.AUTO,          # Input format: AUTO, GEOPARQUET, or PARQUET_WKB
+    output_format=OutputFormat.GEOPARQUET,  # Output format: GEOPARQUET, PARQUET_WKB, or DATAFRAME
+    geometry_column="geometry",             # Geometry column name (for non-standard schemas)
     write_intermediate_files=True,          # Write intermediate files for caching
     reuse_existing_intermediate_outputs=True,  # Reuse cached intermediate files
     compression="zstd",                     # Parquet compression codec
@@ -162,13 +171,51 @@ The wrangler acts as the "keeper of state" for the pipeline, managing:
 - Optional disk persistence of intermediate results
 - Geometry type conversion (WKB ↔ GeometryUDT)
 - Cache isolation via path hashing for different filter configurations
+- Support for both GeoParquet and Parquet+WKB formats
+
+**Pipeline Steps (SplitterStep enum):**
+
+The wrangler tracks these pipeline steps for caching:
+- `read_input`: Raw input data (read-only, not stored)
+- `spatial_filter`: Data after applying WKT spatial filter
+- `joined`: Segments joined with connectors
+- `raw_split`: UDF output with split results
+- `segment_splits_exploded`: Exploded split segments
+- `debug`: Debug output with length comparison per segment
+- `final_output`: Final combined output
 
 **Example: Split only at LR values from specific columns, not at connectors:**
 
 ```python
-result_df = splitter.split(filter_wkt="POLYGON(...)")
-# With config:
-# SplitConfig(split_at_connectors=False, lr_columns_to_include=["road_flags"])
+splitter = OvertureTransportationSplitter(
+    spark=spark_session,
+    wrangler=SplitterDataWrangler(
+        input_path="path/to/data/*.parquet",
+        output_path="output/"
+    ),
+    cfg=SplitConfig(
+        split_at_connectors=False,  # Default behavior
+        lr_columns_to_include=["road_flags"]
+    )
+)
+result_df = splitter.split()
+```
+
+**Example: Enable debug output:**
+
+```python
+splitter = OvertureTransportationSplitter(
+    spark=spark_session,
+    wrangler=SplitterDataWrangler(
+        input_path="path/to/data/*.parquet",
+        output_path="output/"
+    ),
+    cfg=SplitConfig(skip_debug_output=False)
+)
+result_df = splitter.split()
+
+# Access debug DataFrame with length comparison info
+debug_df = splitter.debug_df
 ```
 
 If you are using databricks you can also add this repo as a git folder, see instructions [here](https://docs.databricks.com/en/repos/repos-setup.html).
@@ -208,29 +255,35 @@ segments_df.hint("shuffle_hash").join(connectors_df, ...)
 
 ### 4. Cache Isolation via Path Suffixes
 
-When `filter_wkt` is set on the wrangler, the output path automatically gets a `_filtered_{hash}` suffix (where hash is an 8-character MD5 of the WKT). This ensures complete cache isolation between different filter polygons:
+When `filter_wkt` is set on the wrangler, the output paths automatically get isolated suffixes based on an MD5 hash of the WKT. This ensures complete cache isolation between different filter polygons:
 
 ```
 # Unfiltered run (output_path="output/"):
 output/_intermediate/1_spatially_filtered/
+output/_debug/
 output/split/
 
-# Filtered run with polygon A:
-output_filtered_a1b2c3d4/_intermediate/1_spatially_filtered/
-output_filtered_a1b2c3d4/split/
+# Filtered run with polygon A (hash: a1b2c3d4):
+output_filtered/_intermediate_a1b2c3d4/1_spatially_filtered/
+output_filtered/_debug_a1b2c3d4/
+output_filtered/split_a1b2c3d4/
 
-# Filtered run with polygon B:
-output_filtered_e5f6g7h8/_intermediate/1_spatially_filtered/
-output_filtered_e5f6g7h8/split/
+# Filtered run with polygon B (hash: e5f6g7h8):
+output_filtered/_intermediate_e5f6g7h8/1_spatially_filtered/
+output_filtered/_debug_e5f6g7h8/
+output_filtered/split_e5f6g7h8/
 ```
 
 ## Version History
 
 - 0.2
-  - Refactored to `OvertureTransportationSplitter` class
+  - Refactored to `OvertureTransportationSplitter` class with `SplitterDataWrangler` for I/O
+  - Added `InputFormat` and `OutputFormat` enums for flexible data format handling
   - Added Sedona `ST_LengthSpheroid` optimization
   - Added bbox predicate pushdown for spatial filtering
   - Added shuffle_hash join hints for planet-scale processing
-  - Added cache invalidation tracking
+  - Added cache isolation with hash-based path suffixes
+  - Changed `split_at_connectors` default to `False`
+  - Added debug DataFrame output via `splitter.debug_df`
 - 0.1
   - Initial Release

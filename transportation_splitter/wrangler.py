@@ -238,6 +238,33 @@ class SplitterDataWrangler:
         if step in self._state:
             return self._state[step]
 
+        # Skip disk cache for joined step when output_format is PARQUET_WKB
+        # because the nested connector_geometry column cannot be converted
+        # from BinaryType to GeometryUDT when reading from Parquet+WKB files
+        if step == SplitterStep.joined and self.output_format == OutputFormat.PARQUET_WKB:
+            logger.debug("Skipping disk cache for joined step (nested geometry incompatibility with PARQUET_WKB)")
+            return None
+
+        # Skip disk cache for spatial_filter step when output_format is PARQUET_WKB
+        # The lazy geometry conversion can cause schema conflicts during downstream
+        # operations when DataFrames are combined
+        if step == SplitterStep.spatial_filter and self.output_format == OutputFormat.PARQUET_WKB:
+            logger.debug(
+                "Skipping disk cache for spatial_filter step (geometry conversion compatibility with PARQUET_WKB)"
+            )
+            return None
+
+        # Skip disk cache for segment_splits_exploded and raw_split for ALL output formats.
+        # These steps contain data that gets combined with other DataFrames
+        # (via unionByName) which causes schema ordering issues during write.
+        # - segment_splits_exploded: segments that get combined with connectors
+        # - raw_split: contains added_connectors_rows that get combined with segments
+        if step in (SplitterStep.segment_splits_exploded, SplitterStep.raw_split):
+            logger.debug(
+                f"Skipping disk cache for {step.name} step (schema ordering issues when combined with other data)"
+            )
+            return None
+
         # Check disk if configured to reuse
         if self.reuse_existing_intermediate_outputs and self.check_exists(spark, step):
             logger.info(f"Reusing existing {step.name} from disk")
@@ -277,8 +304,21 @@ class SplitterDataWrangler:
         if SplitterStep.spatial_filter in self._state:
             return self._state[SplitterStep.spatial_filter]
 
-        # Check disk cache for filtered data
-        if self.reuse_existing_intermediate_outputs and self.check_exists(spark, SplitterStep.spatial_filter):
+        # Skip disk cache for spatial_filter step when output_format is PARQUET_WKB
+        # The lazy geometry conversion can cause schema conflicts during downstream
+        # operations when DataFrames are combined
+        skip_disk_cache = self.output_format == OutputFormat.PARQUET_WKB
+        if skip_disk_cache:
+            logger.debug(
+                "Skipping disk cache for spatial_filter step (geometry conversion compatibility with PARQUET_WKB)"
+            )
+
+        # Check disk cache for filtered data (unless skipping)
+        if (
+            not skip_disk_cache
+            and self.reuse_existing_intermediate_outputs
+            and self.check_exists(spark, SplitterStep.spatial_filter)
+        ):
             logger.info("Reusing existing spatially filtered data from disk")
             df = self.read(spark, SplitterStep.spatial_filter)
             self._state[SplitterStep.spatial_filter] = df
@@ -361,11 +401,9 @@ class SplitterDataWrangler:
             # raw_split has no geometry column
             return self._read_parquet(spark, read_path)
         else:
-            # Intermediate files use GeoParquet or Parquet+WKB based on output_format
-            if self.output_format == OutputFormat.GEOPARQUET:
-                return self._read_geoparquet(spark, read_path)
-            else:
-                return self._read_parquet_wkb(spark, read_path)
+            # Intermediate files: auto-detect format since they may have been
+            # written by a different wrangler instance with a different output_format
+            return self._read_auto_detect(spark, read_path)
 
     def write(self, df: DataFrame, step: SplitterStep) -> None:
         """
@@ -442,27 +480,86 @@ class SplitterDataWrangler:
     # =========================================================================
 
     def _read_input(self, spark: SparkSession, path: str) -> DataFrame:
-        """Read input data based on configured input_format."""
+        """Read input data based on configured input_format.
+
+        Input files (unlike intermediate files) may contain segments and connectors
+        with different schemas, so we always use mergeSchema=true when reading.
+        """
         if self.input_format == InputFormat.AUTO:
-            return self._read_auto_detect(spark, path)
+            # Auto-detect: check if GeoParquet or Parquet+WKB
+            if self._is_native_geoparquet(spark, path):
+                logger.debug(f"Detected native GeoParquet input at {path}")
+                return self._read_geoparquet(spark, path)
+            else:
+                # Parquet+WKB - need mergeSchema for segments/connectors with different columns
+                logger.debug(f"Reading input as Parquet+WKB with mergeSchema at {path}")
+                return self._read_parquet_wkb(spark, path)
         elif self.input_format == InputFormat.GEOPARQUET:
             return self._read_geoparquet(spark, path)
         else:  # PARQUET_WKB
             return self._read_parquet_wkb(spark, path)
 
     def _read_auto_detect(self, spark: SparkSession, path: str) -> DataFrame:
-        """Auto-detect format and read appropriately."""
+        """Auto-detect format and read appropriately.
+
+        For cached intermediate files, we need to be careful because:
+        - GeoParquet files have native GeometryUDT
+        - Parquet+WKB files have BinaryType that needs conversion
+
+        We probe a single file first to determine the actual schema, then read
+        all files with explicit format handling.
+
+        NOTE: We do NOT use mergeSchema for intermediate files because:
+        1. All files within an intermediate step have the same schema
+        2. mergeSchema can cause column ordering issues when combining with other DataFrames
+        """
+        # First, check if this is native GeoParquet by probing the actual column type
         if self._is_native_geoparquet(spark, path):
-            return self._read_geoparquet(spark, path)
-        else:
-            return self._read_parquet_wkb(spark, path)
+            logger.debug(f"Detected native GeoParquet at {path}")
+            # For intermediate files, read without mergeSchema to avoid column ordering issues
+            df = spark.read.format("geoparquet").load(path)
+            return self._ensure_geometry_udt(df)
+
+        # Not GeoParquet - read as Parquet+WKB
+        # For intermediate files, we don't use mergeSchema because all files
+        # have the same schema.
+        logger.debug(f"Reading as Parquet+WKB (no mergeSchema) at {path}")
+        geom_col = self.geometry_column
+        df = spark.read.parquet(path)
+        return df.withColumn(geom_col, expr(f"ST_GeomFromWKB({geom_col})"))
 
     def _is_native_geoparquet(self, spark: SparkSession, path: str) -> bool:
-        """Check if a parquet file is in native GeoParquet format."""
+        """Check if a parquet file is in native GeoParquet format.
+
+        GeoParquet files contain special metadata ("geo" key) that identifies
+        which columns contain geometry and how to parse them. We check for this
+        metadata to distinguish from plain Parquet+WKB files.
+        """
         try:
-            sample_df = spark.read.format("geoparquet").load(path).limit(1)
-            col_type = sample_df.schema[self.geometry_column].dataType
-            return str(col_type) == "GeometryType()"
+            # Try to read a single parquet file to check for GeoParquet metadata
+            import glob as glob_module
+
+            from pyarrow import parquet as pq
+
+            # Handle glob patterns
+            if "*" in path:
+                files = glob_module.glob(path)
+                if not files:
+                    return False
+                sample_file = files[0]
+            else:
+                # Directory: find first parquet file
+                files = glob_module.glob(f"{path}/*.parquet")
+                if not files:
+                    return False
+                sample_file = files[0]
+
+            # Check for GeoParquet metadata
+            pq_file = pq.ParquetFile(sample_file)
+            metadata = pq_file.schema_arrow.metadata
+            if metadata is not None and b"geo" in metadata:
+                return True
+            return False
         except Exception:
             return False
 
@@ -477,13 +574,16 @@ class SplitterDataWrangler:
         return self._ensure_geometry_udt(df)
 
     def _read_parquet_wkb(self, spark: SparkSession, path: str) -> DataFrame:
-        """Read a Parquet file with WKB-encoded geometry."""
+        """Read a Parquet file with WKB-encoded geometry.
+
+        The geometry column is read as BinaryType and then converted to GeometryUDT.
+        Uses mergeSchema to handle files with different schemas (e.g., segments
+        and connectors in the same glob pattern).
+        """
         geom_col = self.geometry_column
-        return (
-            spark.read.option("mergeSchema", "true")
-            .parquet(path)
-            .withColumn(geom_col, expr(f"ST_GeomFromWKB({geom_col})"))
-        )
+        df = spark.read.option("mergeSchema", "true").parquet(path)
+        # Convert WKB to GeometryUDT
+        return df.withColumn(geom_col, expr(f"ST_GeomFromWKB({geom_col})"))
 
     def _read_parquet(self, spark: SparkSession, path: str) -> DataFrame:
         """Read a plain Parquet file (no geometry parsing)."""
