@@ -47,22 +47,6 @@ class SplitterStep(Enum):
     final_output = "final"
 
 
-class InputFormat(Enum):
-    """Input data format options."""
-
-    GEOPARQUET = "geoparquet"  # Native GeoParquet with GeometryType
-    PARQUET_WKB = "parquet_wkb"  # Standard Parquet with WKB-encoded geometry
-    AUTO = "auto"  # Auto-detect format (default)
-
-
-class OutputFormat(Enum):
-    """Output data format options."""
-
-    GEOPARQUET = "geoparquet"  # Native GeoParquet with GeometryType
-    PARQUET_WKB = "parquet_wkb"  # Standard Parquet with WKB-encoded geometry
-    DATAFRAME = "dataframe"  # Just return the DF at the end of the split() function
-
-
 @dataclass
 class SplitterDataWrangler:
     """
@@ -74,6 +58,9 @@ class SplitterDataWrangler:
     - Geometry type conversion (WKB ↔ GeometryUDT)
     - Spatial filtering when filter_wkt is configured
     - Cache isolation via path hashing for different filter configurations
+
+    Input format is always auto-detected by checking for GeoParquet metadata.
+    Output format is controlled by the write_geoparquet flag.
 
     Example:
         >>> wrangler = SplitterDataWrangler(
@@ -102,9 +89,9 @@ class SplitterDataWrangler:
     # polygon will be processed. Creates isolated cache paths with _filtered suffix.
     filter_wkt: str | None = None
 
-    # Format options
-    input_format: InputFormat = InputFormat.AUTO
-    output_format: OutputFormat = OutputFormat.GEOPARQUET
+    # Output format: True for GeoParquet (native geometry), False for Parquet+WKB
+    # Input format is always auto-detected.
+    write_geoparquet: bool = True
 
     # Geometry column name (for non-standard column names)
     geometry_column: str = "geometry"
@@ -160,7 +147,6 @@ class SplitterDataWrangler:
             self._intermediate_path = None
             self._final_output_path = None
             self._filter_hash = None
-            self.output_format = OutputFormat.DATAFRAME
 
     def _compute_filter_hash(self, wkt: str) -> str:
         """Compute a short hash of the filter WKT for path isolation.
@@ -218,8 +204,12 @@ class SplitterDataWrangler:
 
         This is the primary method for retrieving data. It checks:
         1. In-memory cache first (fastest)
-        2. Disk cache if reuse_existing_intermediate_outputs is True
+        2. Disk cache for spatial_filter step only (if reuse_existing_intermediate_outputs is True)
         3. Returns None if data is not available anywhere
+
+        Currently, only the spatial_filter step supports disk cache reuse.
+        Other intermediate steps are always recomputed to avoid schema/geometry
+        conversion issues.
 
         Geometry conversion is handled by the read methods:
         - GeoParquet: returns GeometryUDT natively
@@ -242,50 +232,36 @@ class SplitterDataWrangler:
 
         # Check in-memory cache first
         if step in self._state:
+            logger.debug(f"[CACHE HIT] Found {step.name} in memory cache")
             return self._state[step]
 
-        # Skip disk cache for joined step when output_format is PARQUET_WKB
-        # because the nested connector_geometry column cannot be converted
-        # from BinaryType to GeometryUDT when reading from Parquet+WKB files
-        if (
-            step == SplitterStep.joined
-            and self.output_format == OutputFormat.PARQUET_WKB
-        ):
-            logger.debug(
-                "Skipping disk cache for joined step (nested geometry incompatibility with PARQUET_WKB)"
-            )
+        # Currently, we only support disk cache reuse for spatial_filter step.
+        # Other intermediate steps have issues with schema ordering or geometry
+        # conversion when read back from disk.
+        if step != SplitterStep.spatial_filter:
+            logger.debug(f"[CACHE SKIP] Disk cache not supported for {step.name} step")
             return None
 
-        # Skip disk cache for spatial_filter step when output_format is PARQUET_WKB
-        # The lazy geometry conversion can cause schema conflicts during downstream
-        # operations when DataFrames are combined
-        if (
-            step == SplitterStep.spatial_filter
-            and self.output_format == OutputFormat.PARQUET_WKB
-        ):
-            logger.debug(
-                "Skipping disk cache for spatial_filter step (geometry conversion compatibility with PARQUET_WKB)"
-            )
-            return None
+        # For spatial_filter: check disk if configured to reuse
+        if self.reuse_existing_intermediate_outputs:
+            cache_path = self._path_for_step(step)
+            logger.info(f"[CACHE CHECK] Looking for {step.name} at: {cache_path}")
 
-        # Skip disk cache for segment_splits_exploded and raw_split for ALL output formats.
-        # These steps contain data that gets combined with other DataFrames
-        # (via unionByName) which causes schema ordering issues during write.
-        # - segment_splits_exploded: segments that get combined with connectors
-        # - raw_split: contains added_connectors_rows that get combined with segments
-        if step in (SplitterStep.segment_splits_exploded, SplitterStep.raw_split):
-            logger.debug(
-                f"Skipping disk cache for {step.name} step (schema ordering issues when combined with other data)"
-            )
-            return None
-
-        # Check disk if configured to reuse
-        if self.reuse_existing_intermediate_outputs and self.check_exists(spark, step):
-            logger.info(f"Reusing existing {step.name} from disk")
-            df = self.read(spark, step)
-            # read() handles geometry conversion for GeoParquet and Parquet+WKB
-            self._state[step] = df
-            return df
+            if self.check_exists(spark, step):
+                logger.info(
+                    f"[CACHE HIT] Found existing {step.name} on disk, reusing..."
+                )
+                df = self.read(spark, step)
+                self._state[step] = df
+                row_count = df.count()
+                logger.info(f"[CACHE HIT] Loaded {row_count} rows from {step.name}")
+                return df
+            else:
+                logger.info(
+                    f"[CACHE MISS] No existing {step.name} found at: {cache_path}"
+                )
+        else:
+            logger.debug(f"[CACHE SKIP] reuse_existing_intermediate_outputs is False")
 
         return None
 
@@ -307,8 +283,10 @@ class SplitterDataWrangler:
         """
         # No filter: just read raw input
         if self.filter_wkt is None:
+            logger.debug("[INPUT] No spatial filter configured, reading raw input")
             # Check in-memory cache first
             if SplitterStep.read_input in self._state:
+                logger.debug("[CACHE HIT] Found raw input in memory cache")
                 return self._state[SplitterStep.read_input]
             df = self.read(spark, SplitterStep.read_input)
             self._state[SplitterStep.read_input] = df
@@ -316,30 +294,34 @@ class SplitterDataWrangler:
 
         # Filter is set - check in-memory cache for filtered data
         if SplitterStep.spatial_filter in self._state:
+            logger.debug("[CACHE HIT] Found spatial_filter in memory cache")
             return self._state[SplitterStep.spatial_filter]
 
-        # Skip disk cache for spatial_filter step when output_format is PARQUET_WKB
-        # The lazy geometry conversion can cause schema conflicts during downstream
-        # operations when DataFrames are combined
-        skip_disk_cache = self.output_format == OutputFormat.PARQUET_WKB
-        if skip_disk_cache:
-            logger.debug(
-                "Skipping disk cache for spatial_filter step (geometry conversion compatibility with PARQUET_WKB)"
-            )
+        # Check disk cache for filtered data
+        # The cached file format doesn't matter - _read_auto_detect handles both
+        # GeoParquet and Parquet+WKB formats transparently
+        if self.reuse_existing_intermediate_outputs:
+            cache_path = self._path_for_step(SplitterStep.spatial_filter)
+            logger.info(f"[CACHE CHECK] Looking for spatial_filter at: {cache_path}")
 
-        # Check disk cache for filtered data (unless skipping)
-        if (
-            not skip_disk_cache
-            and self.reuse_existing_intermediate_outputs
-            and self.check_exists(spark, SplitterStep.spatial_filter)
-        ):
-            logger.info("Reusing existing spatially filtered data from disk")
-            df = self.read(spark, SplitterStep.spatial_filter)
-            self._state[SplitterStep.spatial_filter] = df
-            return df
+            if self.check_exists(spark, SplitterStep.spatial_filter):
+                logger.info(
+                    "[CACHE HIT] Found existing spatial_filter on disk, reusing..."
+                )
+                df = self.read(spark, SplitterStep.spatial_filter)
+                self._state[SplitterStep.spatial_filter] = df
+                row_count = df.count()
+                logger.info(f"[CACHE HIT] Loaded {row_count} rows from spatial_filter")
+                return df
+            else:
+                logger.info(
+                    f"[CACHE MISS] No existing spatial_filter found at: {cache_path}"
+                )
+        else:
+            logger.debug("[CACHE SKIP] reuse_existing_intermediate_outputs is False")
 
         # Need to compute: read raw input and apply filter
-        logger.info(f"Applying spatial filter: {self.filter_wkt[:50]}...")
+        logger.info(f"[COMPUTE] Applying spatial filter: {self.filter_wkt[:80]}...")
         raw_df = self.read(spark, SplitterStep.read_input)
         filtered_df = self._apply_spatial_filter(raw_df, self.filter_wkt)
 
@@ -348,6 +330,7 @@ class SplitterDataWrangler:
 
         # Optionally write filtered data to cache
         if self.write_intermediate_files and self.output_path is not None:
+            logger.info(f"[CACHE WRITE] Writing spatial_filter to disk")
             self.write(filtered_df, SplitterStep.spatial_filter)
 
         return filtered_df
@@ -417,7 +400,7 @@ class SplitterDataWrangler:
             return self._read_parquet(spark, read_path)
         else:
             # Intermediate files: auto-detect format since they may have been
-            # written by a different wrangler instance with a different output_format
+            # written by a different wrangler instance with a different write_geoparquet setting
             return self._read_auto_detect(spark, read_path)
 
     def write(self, df: DataFrame, step: SplitterStep) -> None:
@@ -441,7 +424,7 @@ class SplitterDataWrangler:
         if step == SplitterStep.raw_split or step == SplitterStep.debug:
             # raw_split and debug have no geometry, must use vanilla Parquet
             self._write_parquet(df, write_path)
-        elif self.output_format == OutputFormat.GEOPARQUET:
+        elif self.write_geoparquet:
             # Use GeoParquet for both intermediate and final output
             self._write_geoparquet(df, write_path)
         else:
@@ -495,23 +478,19 @@ class SplitterDataWrangler:
     # =========================================================================
 
     def _read_input(self, spark: SparkSession, path: str) -> DataFrame:
-        """Read input data based on configured input_format.
+        """Read input data with auto-detection of format.
 
         Input files (unlike intermediate files) may contain segments and connectors
         with different schemas, so we always use mergeSchema=true when reading.
+        Format is auto-detected by checking for GeoParquet metadata.
         """
-        if self.input_format == InputFormat.AUTO:
-            # Auto-detect: check if GeoParquet or Parquet+WKB
-            if self._is_native_geoparquet(spark, path):
-                logger.debug(f"Detected native GeoParquet input at {path}")
-                return self._read_geoparquet(spark, path)
-            else:
-                # Parquet+WKB - need mergeSchema for segments/connectors with different columns
-                logger.debug(f"Reading input as Parquet+WKB with mergeSchema at {path}")
-                return self._read_parquet_wkb(spark, path)
-        elif self.input_format == InputFormat.GEOPARQUET:
+        # Auto-detect: check if GeoParquet or Parquet+WKB
+        if self._is_native_geoparquet(spark, path):
+            logger.debug(f"Detected native GeoParquet input at {path}")
             return self._read_geoparquet(spark, path)
-        else:  # PARQUET_WKB
+        else:
+            # Parquet+WKB - need mergeSchema for segments/connectors with different columns
+            logger.debug(f"Reading input as Parquet+WKB with mergeSchema at {path}")
             return self._read_parquet_wkb(spark, path)
 
     def _read_auto_detect(self, spark: SparkSession, path: str) -> DataFrame:
@@ -691,14 +670,15 @@ class SplitterDataWrangler:
             intermediate_str = "(none - in-memory only)"
             output_str = "(none - in-memory only)"
 
+        output_format_str = "GeoParquet" if self.write_geoparquet else "Parquet+WKB"
+
         lines = [
             "SplitterDataWrangler:",
             f"  Input:              {self.input_path}",
             f"  Intermediate:       {intermediate_str}",
             f"  Output:             {output_str}",
             f"  Filter:             {filter_str}",
-            f"  Input Format:       {self.input_format.value}",
-            f"  Output Format:      {self.output_format.value}",
+            f"  Output Format:      {output_format_str}",
             f"  Write Intermediate: {self.write_intermediate_files}",
             f"  Reuse Existing:     {self.reuse_existing_intermediate_outputs}",
             f"  Compression:        {self.compression}",

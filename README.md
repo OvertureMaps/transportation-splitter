@@ -36,7 +36,7 @@ See [pyproject.toml](/pyproject.toml) for required packages.
 **Requirements:**
 
 - Python 3.10+
-- Java 11+ (required for Apache Sedona 1.8.x)
+- Java 17+ (recommended for Apache Sedona 1.8.x)
 - PySpark 3.5.x
 - Apache Sedona 1.8.x
 
@@ -57,9 +57,9 @@ pip install -e .
 **Running tests**
 
 ```bash
-# Ensure Java 11 is being used (required for Sedona 1.8.x)
-export JAVA_HOME=/opt/homebrew/opt/openjdk@11  # macOS with Homebrew
-# Or on Linux: export JAVA_HOME=/usr/lib/jvm/java-11-openjdk
+# Ensure Java 17 is being used (recommended for Sedona 1.8.x)
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17  # macOS with Homebrew
+# Or on Linux: export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
 
 # Install with test dependencies and run tests
 uv sync --group test
@@ -145,18 +145,13 @@ SplitConfig(
 The `SplitterDataWrangler` handles I/O configuration and state management:
 
 ```python
-from transportation_splitter import (
-    SplitterDataWrangler,
-    InputFormat,
-    OutputFormat,
-)
+from transportation_splitter import SplitterDataWrangler
 
 SplitterDataWrangler(
     input_path="path/to/data/*.parquet",   # Input data path (glob patterns supported)
     output_path="output/",                  # Output directory for results (None = in-memory only)
     filter_wkt="POLYGON(...)",              # Optional spatial filter (WKT polygon)
-    input_format=InputFormat.AUTO,          # Input format: AUTO, GEOPARQUET, or PARQUET_WKB
-    output_format=OutputFormat.GEOPARQUET,  # Output format: GEOPARQUET, PARQUET_WKB, or DATAFRAME
+    write_geoparquet=True,                  # Output format: True=GeoParquet, False=Parquet+WKB
     geometry_column="geometry",             # Geometry column name (for non-standard schemas)
     write_intermediate_files=True,          # Write intermediate files for caching
     reuse_existing_intermediate_outputs=True,  # Reuse cached intermediate files
@@ -164,6 +159,8 @@ SplitterDataWrangler(
     block_size=16 * 1024 * 1024,           # Parquet row group size (16MB default)
 )
 ```
+
+**Note:** Input format is always auto-detected by checking for GeoParquet metadata (the `geo` key in Parquet file metadata). You don't need to specify it.
 
 The wrangler acts as the "keeper of state" for the pipeline, managing:
 
@@ -176,6 +173,7 @@ The wrangler acts as the "keeper of state" for the pipeline, managing:
 **Pipeline Steps (SplitterStep enum):**
 
 The wrangler tracks these pipeline steps for caching:
+
 - `read_input`: Raw input data (read-only, not stored)
 - `spatial_filter`: Data after applying WKT spatial filter
 - `joined`: Segments joined with connectors
@@ -278,7 +276,8 @@ output_filtered/split_e5f6g7h8/
 
 - 0.2
   - Refactored to `OvertureTransportationSplitter` class with `SplitterDataWrangler` for I/O
-  - Added `InputFormat` and `OutputFormat` enums for flexible data format handling
+  - Simplified API: removed `InputFormat`/`OutputFormat` enums, replaced with `write_geoparquet` boolean
+  - Input format is always auto-detected by checking for GeoParquet metadata
   - Added Sedona `ST_LengthSpheroid` optimization
   - Added bbox predicate pushdown for spatial filtering
   - Added shuffle_hash join hints for planet-scale processing

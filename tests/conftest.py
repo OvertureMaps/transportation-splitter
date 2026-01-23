@@ -13,7 +13,7 @@ from sedona.spark import SedonaContext
 def quiet_py4j():
     """Suppress spark logging for the test context."""
     logger = logging.getLogger("py4j")
-    logger.setLevel(logging.WARN)
+    logger.setLevel(logging.INFO)
 
 
 # Path to test data directory
@@ -51,6 +51,11 @@ def spark_session(request):
         .master("local[*]")
         .config("spark.driver.host", "127.0.0.1")
         .config("spark.driver.bindAddress", "127.0.0.1")
+        .config("spark.driver.memory", "16g")
+        # 2. Sedona performs better with more memory for spatial indexing
+        .config("spark.executor.memory", "16g")
+        # 3. Optimized for M-series storage (SSD)
+        .config("spark.local.dir", "/tmp/spark-temp")
         .config(
             "spark.jars.packages",
             f"org.apache.sedona:sedona-spark-shaded-{spark_version_for_sedona}_2.12:{sedona_version}",
