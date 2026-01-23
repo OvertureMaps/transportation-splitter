@@ -1,0 +1,148 @@
+name: "Build & Publish"
+
+# This workflow builds the package and optionally publishes releases.
+# - On PRs: Builds only (verifies the package builds correctly)
+# - On manual dispatch: Can create a pre-release from any branch
+# - On version tags: Creates a GitHub release
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a GitHub release?'
+        required: true
+        default: true
+        type: boolean
+      release_type:
+        description: 'Release type (only if creating release)'
+        required: true
+        default: 'prerelease'
+        type: choice
+        options:
+          - prerelease
+          - release
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      branch_suffix: ${{ steps.get_branch.outputs.suffix }}
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Get version from pyproject.toml
+      id: get_version
+      run: |
+        VERSION=$(grep -m1 'version = ' pyproject.toml | cut -d'"' -f2)
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Package version: $VERSION"
+
+    - name: Get branch suffix for pre-releases
+      id: get_branch
+      run: |
+        if [[ "${{ github.ref }}" == refs/heads/* ]]; then
+          BRANCH="${{ github.ref_name }}"
+          # Sanitize branch name for use in version
+          SUFFIX=$(echo "$BRANCH" | sed 's/[^a-zA-Z0-9]/-/g' | cut -c1-20)
+          echo "suffix=-${SUFFIX}" >> $GITHUB_OUTPUT
+          echo "Branch suffix: -${SUFFIX}"
+        else
+          echo "suffix=" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Build package
+      run: uv build
+
+    - name: List build artifacts
+      run: ls -la dist/
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: dist
+        path: dist/
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+    permissions:
+      contents: write
+    steps:
+    - name: Check out repository
+      uses: actions/checkout@v4
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: dist
+        path: dist/
+
+    - name: List downloaded artifacts
+      run: ls -la dist/
+
+    - name: Determine release tag
+      id: release_tag
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          # Use the pushed tag
+          echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          echo "name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+        else
+          # Create tag from version + branch for pre-releases from branches
+          VERSION="${{ needs.build.outputs.version }}"
+          SUFFIX="${{ needs.build.outputs.branch_suffix }}"
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          TAG="v${VERSION}${SUFFIX}-${TIMESTAMP}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "name=${TAG}" >> $GITHUB_OUTPUT
+          echo "Creating release with tag: ${TAG}"
+        fi
+
+    # For tag-triggered releases
+    - name: Create Release (from tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      with:
+        files: dist/*
+        generate_release_notes: true
+        prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
+
+    # For manual workflow dispatch (from any branch)
+    - name: Create Release (manual)
+      if: github.event_name == 'workflow_dispatch'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.release_tag.outputs.tag }}
+        name: ${{ steps.release_tag.outputs.name }}
+        files: dist/*
+        generate_release_notes: true
+        prerelease: ${{ github.event.inputs.release_type == 'prerelease' }}
+        target_commitish: ${{ github.sha }}
+        body: |
+          Pre-release build from branch `${{ github.ref_name }}`
+
+          Commit: ${{ github.sha }}
+
+          ⚠️ This is a development pre-release and may not be stable.
