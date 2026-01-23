@@ -21,8 +21,6 @@ from pyspark.context import SparkContext
 from sedona.spark import SedonaContext
 
 from transportation_splitter import (
-    InputFormat,
-    OutputFormat,
     OvertureTransportationSplitter,
     SplitConfig,
     SplitterDataWrangler,
@@ -50,8 +48,7 @@ COLORADO = "POLYGON((-109.0602 41.0034, -102.0416 41.0034, -102.0416 36.9925, -1
 wrangler = SplitterDataWrangler(
     input_path=f"s3://overturemaps-us-west-2/release/{OVERTURE_RELEASE_VERSION}/theme=transportation/",
     output_path=MY_S3_BUCKET_OUTPUT_PATH,
-    input_format=InputFormat.PARQUET_WKB,
-    output_format=OutputFormat.GEOPARQUET,
+    write_geoparquet=True,
     write_intermediate_files=True,
     filter_wkt=COLORADO,
 )

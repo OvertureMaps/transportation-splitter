@@ -8,7 +8,7 @@
 
 ### Purpose
 
-The **Transportation Splitter** is a production-grade PySpark application that processes Overture Maps transportation data. It intelligently splits complex road segments into simpler sub-segments, making the data easier to consume for GIS and transportation applications.
+The **Transportation Splitter** is a PySpark application that processes Overture Maps transportation data. It splits complex road segments into simpler sub-segments, making the data easier to consume for GIS and transportation applications.
 
 ### Problem It Solves
 
@@ -31,7 +31,7 @@ The splitter simplifies this by:
 - 🌐 Spatial filtering with WKT polygons (bbox predicate pushdown)
 - 💾 Intermediate file caching for resumable pipelines
 - 🚀 Planet-scale optimizations (shuffle hash joins, Sedona integration)
-- 📊 Comprehensive debug output for diagnostics
+- 📊 Debug output for diagnostics
 
 ### Technologies Used
 
@@ -171,7 +171,7 @@ graph TB
 - [`store()`](transportation-splitter/transportation_splitter/wrangler.py#L172) - Store DataFrame to cache
 - [`get()`](transportation-splitter/transportation_splitter/wrangler.py#L210) - Retrieve DataFrame from cache
 - [`_apply_spatial_filter()`](transportation-splitter/transportation_splitter/wrangler.py#L301) - Bbox + geometry filtering
-- [`InputFormat`](transportation-splitter/transportation_splitter/wrangler.py#L50) / [`OutputFormat`](transportation-splitter/transportation_splitter/wrangler.py#L58) - Format enums
+- `write_geoparquet: bool` - Output format flag (input format is auto-detected)
 
 **Depends On**:
 
@@ -611,13 +611,14 @@ sequenceDiagram
 - **Optional Fields**:
   - `output_path: str | None` - Output directory (None = in-memory only)
   - `filter_wkt: str | None` - WKT polygon for spatial filtering
-  - `input_format: InputFormat` - Input format detection (default: `AUTO`)
-  - `output_format: OutputFormat` - Output format (default: `GEOPARQUET`)
+  - `write_geoparquet: bool` - Output format: True=GeoParquet, False=Parquet+WKB (default: `True`)
   - `geometry_column: str` - Geometry column name (default: `"geometry"`)
   - `compression: str` - Parquet compression (default: `"zstd"`)
   - `block_size: int` - Row group size (default: `16MB`)
   - `write_intermediate_files: bool` - Cache to disk (default: `True`)
   - `reuse_existing_intermediate_outputs: bool` - Use disk cache (default: `True`)
+
+**Note:** Input format is always auto-detected by checking for GeoParquet metadata.
 
 ---
 
@@ -844,8 +845,6 @@ from transportation_splitter import (
     # I/O handling
     SplitterDataWrangler,
     SplitterStep,
-    InputFormat,
-    OutputFormat,
 
     # Domain models
     JoinedConnector,

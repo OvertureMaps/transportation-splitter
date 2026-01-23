@@ -86,7 +86,7 @@ sedona.sql("SELECT ST_POINT(1., 2.) as geom").show()
 
 ### Executing program
 
-Use the `OvertureTransportationSplitter` class for a clean, object-oriented interface:
+Use the `OvertureTransportationSplitter` class:
 
 ```python
 from transportation_splitter import (
