@@ -134,12 +134,8 @@ class SplitterDataWrangler:
                 self._base_output_path = self.output_path
             # Apply hash suffix to folder names when filtered
             if self._filter_hash:
-                self._intermediate_path = (
-                    f"{self._base_output_path}/_intermediate_{self._filter_hash}"
-                )
-                self._final_output_path = (
-                    f"{self._base_output_path}/split_{self._filter_hash}"
-                )
+                self._intermediate_path = f"{self._base_output_path}/_intermediate_{self._filter_hash}"
+                self._final_output_path = f"{self._base_output_path}/split_{self._filter_hash}"
             else:
                 self._intermediate_path = f"{self.output_path}/_intermediate"
                 self._final_output_path = f"{self.output_path}/split"
@@ -190,9 +186,7 @@ class SplitterDataWrangler:
             should_write = False
         else:
             # Intermediate steps: write if configured
-            should_write = (
-                self.write_intermediate_files and self.output_path is not None
-            )
+            should_write = self.write_intermediate_files and self.output_path is not None
 
         if should_write:
             self.write(df, step)
@@ -248,20 +242,16 @@ class SplitterDataWrangler:
             logger.info(f"[CACHE CHECK] Looking for {step.name} at: {cache_path}")
 
             if self.check_exists(spark, step):
-                logger.info(
-                    f"[CACHE HIT] Found existing {step.name} on disk, reusing..."
-                )
+                logger.info(f"[CACHE HIT] Found existing {step.name} on disk, reusing...")
                 df = self.read(spark, step)
                 self._state[step] = df
                 row_count = df.count()
                 logger.info(f"[CACHE HIT] Loaded {row_count} rows from {step.name}")
                 return df
             else:
-                logger.info(
-                    f"[CACHE MISS] No existing {step.name} found at: {cache_path}"
-                )
+                logger.info(f"[CACHE MISS] No existing {step.name} found at: {cache_path}")
         else:
-            logger.debug(f"[CACHE SKIP] reuse_existing_intermediate_outputs is False")
+            logger.debug("[CACHE SKIP] reuse_existing_intermediate_outputs is False")
 
         return None
 
@@ -305,18 +295,14 @@ class SplitterDataWrangler:
             logger.info(f"[CACHE CHECK] Looking for spatial_filter at: {cache_path}")
 
             if self.check_exists(spark, SplitterStep.spatial_filter):
-                logger.info(
-                    "[CACHE HIT] Found existing spatial_filter on disk, reusing..."
-                )
+                logger.info("[CACHE HIT] Found existing spatial_filter on disk, reusing...")
                 df = self.read(spark, SplitterStep.spatial_filter)
                 self._state[SplitterStep.spatial_filter] = df
                 row_count = df.count()
                 logger.info(f"[CACHE HIT] Loaded {row_count} rows from spatial_filter")
                 return df
             else:
-                logger.info(
-                    f"[CACHE MISS] No existing spatial_filter found at: {cache_path}"
-                )
+                logger.info(f"[CACHE MISS] No existing spatial_filter found at: {cache_path}")
         else:
             logger.debug("[CACHE SKIP] reuse_existing_intermediate_outputs is False")
 
@@ -330,7 +316,7 @@ class SplitterDataWrangler:
 
         # Optionally write filtered data to cache
         if self.write_intermediate_files and self.output_path is not None:
-            logger.info(f"[CACHE WRITE] Writing spatial_filter to disk")
+            logger.info("[CACHE WRITE] Writing spatial_filter to disk")
             self.write(filtered_df, SplitterStep.spatial_filter)
 
         return filtered_df
@@ -350,6 +336,7 @@ class SplitterDataWrangler:
         """
         from pyspark.sql.functions import col
         from shapely import wkt
+
         from transportation_splitter.geometry import sanitize_wkt
 
         # Sanitize the WKT to handle invalid characters and escape quotes
@@ -369,9 +356,7 @@ class SplitterDataWrangler:
 
         # Apply precise geometry intersection filter
         # Use Sedona's ST_Intersects for accurate filtering
-        return bbox_filtered.filter(
-            expr(f"ST_Intersects(geometry, ST_GeomFromWKT('{sanitized_wkt}'))")
-        )
+        return bbox_filtered.filter(expr(f"ST_Intersects(geometry, ST_GeomFromWKT('{sanitized_wkt}'))"))
 
     # =========================================================================
     # Low-level I/O - Override these in subclasses for custom storage

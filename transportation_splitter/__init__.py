@@ -25,10 +25,7 @@ from transportation_splitter.linear_reference import (
 )
 from transportation_splitter.models import JoinedConnector, SplitPoint, SplitSegment
 from transportation_splitter.pipeline import OvertureTransportationSplitter
-from transportation_splitter.wrangler import (
-    SplitterDataWrangler,
-    SplitterStep,
-)
+from transportation_splitter.wrangler import SplitterDataWrangler, SplitterStep
 
 __all__ = [
     # Main entry point

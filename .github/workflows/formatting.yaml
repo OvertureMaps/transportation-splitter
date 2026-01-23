@@ -5,8 +5,14 @@ on:
     branches: [main]
   push:
     branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  lint:
+  formatting:
+    name: Formatting & Linting Tests
     runs-on: ubuntu-latest
     steps:
     - name: Check out repository

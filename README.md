@@ -57,11 +57,6 @@ pip install -e .
 **Running tests**
 
 ```bash
-# Ensure Java 17 is being used (recommended for Sedona 1.8.x)
-export JAVA_HOME=/opt/homebrew/opt/openjdk@17  # macOS with Homebrew
-# Or on Linux: export JAVA_HOME=/usr/lib/jvm/java-17-openjdk
-
-# Install with test dependencies and run tests
 uv sync --group test
 uv run pytest tests/
 ```
