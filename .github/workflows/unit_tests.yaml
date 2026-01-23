@@ -3,8 +3,18 @@ on:
   workflow_dispatch:
   pull_request:
     branches: [main]
+    paths:
+      - 'transportation_splitter/**'
+      - 'tests/unit/**'
+      - 'pyproject.toml'
+      - '.github/workflows/unit_tests.yaml'
   push:
     branches: [main]
+    paths:
+      - 'transportation_splitter/**'
+      - 'tests/unit/**'
+      - 'pyproject.toml'
+      - '.github/workflows/unit_tests.yaml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
