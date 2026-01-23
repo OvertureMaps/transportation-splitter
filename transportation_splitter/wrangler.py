@@ -147,8 +147,12 @@ class SplitterDataWrangler:
                 self._base_output_path = self.output_path
             # Apply hash suffix to folder names when filtered
             if self._filter_hash:
-                self._intermediate_path = f"{self._base_output_path}/_intermediate_{self._filter_hash}"
-                self._final_output_path = f"{self._base_output_path}/split_{self._filter_hash}"
+                self._intermediate_path = (
+                    f"{self._base_output_path}/_intermediate_{self._filter_hash}"
+                )
+                self._final_output_path = (
+                    f"{self._base_output_path}/split_{self._filter_hash}"
+                )
             else:
                 self._intermediate_path = f"{self.output_path}/_intermediate"
                 self._final_output_path = f"{self.output_path}/split"
@@ -200,7 +204,9 @@ class SplitterDataWrangler:
             should_write = False
         else:
             # Intermediate steps: write if configured
-            should_write = self.write_intermediate_files and self.output_path is not None
+            should_write = (
+                self.write_intermediate_files and self.output_path is not None
+            )
 
         if should_write:
             self.write(df, step)
@@ -241,14 +247,22 @@ class SplitterDataWrangler:
         # Skip disk cache for joined step when output_format is PARQUET_WKB
         # because the nested connector_geometry column cannot be converted
         # from BinaryType to GeometryUDT when reading from Parquet+WKB files
-        if step == SplitterStep.joined and self.output_format == OutputFormat.PARQUET_WKB:
-            logger.debug("Skipping disk cache for joined step (nested geometry incompatibility with PARQUET_WKB)")
+        if (
+            step == SplitterStep.joined
+            and self.output_format == OutputFormat.PARQUET_WKB
+        ):
+            logger.debug(
+                "Skipping disk cache for joined step (nested geometry incompatibility with PARQUET_WKB)"
+            )
             return None
 
         # Skip disk cache for spatial_filter step when output_format is PARQUET_WKB
         # The lazy geometry conversion can cause schema conflicts during downstream
         # operations when DataFrames are combined
-        if step == SplitterStep.spatial_filter and self.output_format == OutputFormat.PARQUET_WKB:
+        if (
+            step == SplitterStep.spatial_filter
+            and self.output_format == OutputFormat.PARQUET_WKB
+        ):
             logger.debug(
                 "Skipping disk cache for spatial_filter step (geometry conversion compatibility with PARQUET_WKB)"
             )
@@ -353,7 +367,6 @@ class SplitterDataWrangler:
         """
         from pyspark.sql.functions import col
         from shapely import wkt
-
         from transportation_splitter.geometry import sanitize_wkt
 
         # Sanitize the WKT to handle invalid characters and escape quotes
@@ -373,7 +386,9 @@ class SplitterDataWrangler:
 
         # Apply precise geometry intersection filter
         # Use Sedona's ST_Intersects for accurate filtering
-        return bbox_filtered.filter(expr(f"ST_Intersects(geometry, ST_GeomFromWKT('{sanitized_wkt}'))"))
+        return bbox_filtered.filter(
+            expr(f"ST_Intersects(geometry, ST_GeomFromWKT('{sanitized_wkt}'))")
+        )
 
     # =========================================================================
     # Low-level I/O - Override these in subclasses for custom storage
