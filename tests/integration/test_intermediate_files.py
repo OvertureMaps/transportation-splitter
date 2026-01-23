@@ -38,9 +38,7 @@ def validate_split_results(result_df, test_name: str) -> tuple[int, int]:
     segment_count = result_df.filter("type = 'segment'").count()
     connector_count = result_df.filter("type = 'connector'").count()
 
-    logger.info(
-        f"\n[{test_name}] Segments: {segment_count}, Connectors: {connector_count}"
-    )
+    logger.info(f"\n[{test_name}] Segments: {segment_count}, Connectors: {connector_count}")
 
     # Verify we got results
     assert segment_count > 0, f"[{test_name}] Expected at least one segment"
@@ -80,9 +78,7 @@ class TestIntermediateFilesParquetWKB:
         )
         result_df = splitter.split()
 
-        segment_count, connector_count = validate_split_results(
-            result_df, "WRITE-PARQUET-WKB"
-        )
+        segment_count, connector_count = validate_split_results(result_df, "WRITE-PARQUET-WKB")
 
         # Store for comparison in subsequent tests
         TestIntermediateFilesParquetWKB.expected_segment_count = segment_count
@@ -107,20 +103,14 @@ class TestIntermediateFilesParquetWKB:
         )
         result_df = splitter.split()
 
-        segment_count, connector_count = validate_split_results(
-            result_df, "REUSE-PARQUET-WKB->PARQUET-WKB"
-        )
+        segment_count, connector_count = validate_split_results(result_df, "REUSE-PARQUET-WKB->PARQUET-WKB")
 
         # Verify counts match the original run
-        assert (
-            segment_count == TestIntermediateFilesParquetWKB.expected_segment_count
-        ), (
+        assert segment_count == TestIntermediateFilesParquetWKB.expected_segment_count, (
             f"Segment count mismatch: got {segment_count}, "
             f"expected {TestIntermediateFilesParquetWKB.expected_segment_count}"
         )
-        assert (
-            connector_count == TestIntermediateFilesParquetWKB.expected_connector_count
-        ), (
+        assert connector_count == TestIntermediateFilesParquetWKB.expected_connector_count, (
             f"Connector count mismatch: got {connector_count}, "
             f"expected {TestIntermediateFilesParquetWKB.expected_connector_count}"
         )
@@ -144,20 +134,14 @@ class TestIntermediateFilesParquetWKB:
         )
         result_df = splitter.split()
 
-        segment_count, connector_count = validate_split_results(
-            result_df, "REUSE-PARQUET-WKB->GEOPARQUET"
-        )
+        segment_count, connector_count = validate_split_results(result_df, "REUSE-PARQUET-WKB->GEOPARQUET")
 
         # Verify counts match the original run
-        assert (
-            segment_count == TestIntermediateFilesParquetWKB.expected_segment_count
-        ), (
+        assert segment_count == TestIntermediateFilesParquetWKB.expected_segment_count, (
             f"Segment count mismatch: got {segment_count}, "
             f"expected {TestIntermediateFilesParquetWKB.expected_segment_count}"
         )
-        assert (
-            connector_count == TestIntermediateFilesParquetWKB.expected_connector_count
-        ), (
+        assert connector_count == TestIntermediateFilesParquetWKB.expected_connector_count, (
             f"Connector count mismatch: got {connector_count}, "
             f"expected {TestIntermediateFilesParquetWKB.expected_connector_count}"
         )
@@ -194,9 +178,7 @@ class TestIntermediateFilesGeoParquet:
         )
         result_df = splitter.split()
 
-        segment_count, connector_count = validate_split_results(
-            result_df, "WRITE-GEOPARQUET"
-        )
+        segment_count, connector_count = validate_split_results(result_df, "WRITE-GEOPARQUET")
 
         # Store for comparison in subsequent tests
         TestIntermediateFilesGeoParquet.expected_segment_count = segment_count
@@ -221,20 +203,14 @@ class TestIntermediateFilesGeoParquet:
         )
         result_df = splitter.split()
 
-        segment_count, connector_count = validate_split_results(
-            result_df, "REUSE-GEOPARQUET->PARQUET-WKB"
-        )
+        segment_count, connector_count = validate_split_results(result_df, "REUSE-GEOPARQUET->PARQUET-WKB")
 
         # Verify counts match the original run
-        assert (
-            segment_count == TestIntermediateFilesGeoParquet.expected_segment_count
-        ), (
+        assert segment_count == TestIntermediateFilesGeoParquet.expected_segment_count, (
             f"Segment count mismatch: got {segment_count}, "
             f"expected {TestIntermediateFilesGeoParquet.expected_segment_count}"
         )
-        assert (
-            connector_count == TestIntermediateFilesGeoParquet.expected_connector_count
-        ), (
+        assert connector_count == TestIntermediateFilesGeoParquet.expected_connector_count, (
             f"Connector count mismatch: got {connector_count}, "
             f"expected {TestIntermediateFilesGeoParquet.expected_connector_count}"
         )
@@ -258,20 +234,14 @@ class TestIntermediateFilesGeoParquet:
         )
         result_df = splitter.split()
 
-        segment_count, connector_count = validate_split_results(
-            result_df, "REUSE-GEOPARQUET->GEOPARQUET"
-        )
+        segment_count, connector_count = validate_split_results(result_df, "REUSE-GEOPARQUET->GEOPARQUET")
 
         # Verify counts match the original run
-        assert (
-            segment_count == TestIntermediateFilesGeoParquet.expected_segment_count
-        ), (
+        assert segment_count == TestIntermediateFilesGeoParquet.expected_segment_count, (
             f"Segment count mismatch: got {segment_count}, "
             f"expected {TestIntermediateFilesGeoParquet.expected_segment_count}"
         )
-        assert (
-            connector_count == TestIntermediateFilesGeoParquet.expected_connector_count
-        ), (
+        assert connector_count == TestIntermediateFilesGeoParquet.expected_connector_count, (
             f"Connector count mismatch: got {connector_count}, "
             f"expected {TestIntermediateFilesGeoParquet.expected_connector_count}"
         )

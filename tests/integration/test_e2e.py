@@ -3,6 +3,7 @@
 import logging
 
 from pyspark.sql import Row
+
 from tests.conftest import get_test_data_path
 from transportation_splitter import (
     DESTINATIONS_COLUMN,
@@ -35,11 +36,7 @@ def test_split_no_connector_split(spark_session):
     )
     result_df = splitter.split()
 
-    actual_df = (
-        result_df.filter("id = '08728d5430ffffff04767d5cdb906cb5'")
-        .sort("start_lr")
-        .collect()
-    )
+    actual_df = result_df.filter("id = '08728d5430ffffff04767d5cdb906cb5'").sort("start_lr").collect()
     assert len(actual_df) == 3
 
     # Check attributes
@@ -51,9 +48,7 @@ def test_split_no_connector_split(spark_session):
             for split in actual_df
         ]
     )
-    assert actual_df[0].road_flags == [
-        Row(values=["is_bridge", "is_link"], between=None)
-    ]
+    assert actual_df[0].road_flags == [Row(values=["is_bridge", "is_link"], between=None)]
     assert actual_df[1].road_flags == [Row(values=["is_link"], between=None)]
     assert actual_df[2].road_flags == [Row(values=["is_link"], between=None)]
     assert actual_df[0].road_surface is None
@@ -99,11 +94,7 @@ def test_split_all_connectors(spark_session):
 
 
 def validate_all_connector_split(result_df):
-    actual_df = (
-        result_df.filter("id = '08728d5430ffffff04767d5cdb906cb5'")
-        .sort("start_lr")
-        .collect()
-    )
+    actual_df = result_df.filter("id = '08728d5430ffffff04767d5cdb906cb5'").sort("start_lr").collect()
     assert len(actual_df) == 4
 
     # Check attributes
@@ -115,12 +106,8 @@ def validate_all_connector_split(result_df):
             for split in actual_df
         ]
     )
-    assert actual_df[0].road_flags == [
-        Row(values=["is_bridge", "is_link"], between=None)
-    ]
-    assert actual_df[1].road_flags == [
-        Row(values=["is_bridge", "is_link"], between=None)
-    ]
+    assert actual_df[0].road_flags == [Row(values=["is_bridge", "is_link"], between=None)]
+    assert actual_df[1].road_flags == [Row(values=["is_bridge", "is_link"], between=None)]
     assert actual_df[2].road_flags == [Row(values=["is_link"], between=None)]
     assert actual_df[3].road_flags == [Row(values=["is_link"], between=None)]
     assert actual_df[0].road_surface is None
