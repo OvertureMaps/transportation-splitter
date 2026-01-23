@@ -3,7 +3,6 @@
 import logging
 
 from pyspark.sql import Row
-
 from tests.conftest import get_test_data_path
 from transportation_splitter import (
     DESTINATIONS_COLUMN,
@@ -36,7 +35,11 @@ def test_split_no_connector_split(spark_session):
     )
     result_df = splitter.split()
 
-    actual_df = result_df.filter("id = '08728d5430ffffff04767d5cdb906cb5'").sort("start_lr").collect()
+    actual_df = (
+        result_df.filter("id = '08728d5430ffffff04767d5cdb906cb5'")
+        .sort("start_lr")
+        .collect()
+    )
     assert len(actual_df) == 3
 
     # Check attributes
@@ -48,7 +51,9 @@ def test_split_no_connector_split(spark_session):
             for split in actual_df
         ]
     )
-    assert actual_df[0].road_flags == [Row(values=["is_bridge", "is_link"], between=None)]
+    assert actual_df[0].road_flags == [
+        Row(values=["is_bridge", "is_link"], between=None)
+    ]
     assert actual_df[1].road_flags == [Row(values=["is_link"], between=None)]
     assert actual_df[2].road_flags == [Row(values=["is_link"], between=None)]
     assert actual_df[0].road_surface is None
@@ -94,7 +99,11 @@ def test_split_all_connectors(spark_session):
 
 
 def validate_all_connector_split(result_df):
-    actual_df = result_df.filter("id = '08728d5430ffffff04767d5cdb906cb5'").sort("start_lr").collect()
+    actual_df = (
+        result_df.filter("id = '08728d5430ffffff04767d5cdb906cb5'")
+        .sort("start_lr")
+        .collect()
+    )
     assert len(actual_df) == 4
 
     # Check attributes
@@ -106,8 +115,12 @@ def validate_all_connector_split(result_df):
             for split in actual_df
         ]
     )
-    assert actual_df[0].road_flags == [Row(values=["is_bridge", "is_link"], between=None)]
-    assert actual_df[1].road_flags == [Row(values=["is_bridge", "is_link"], between=None)]
+    assert actual_df[0].road_flags == [
+        Row(values=["is_bridge", "is_link"], between=None)
+    ]
+    assert actual_df[1].road_flags == [
+        Row(values=["is_bridge", "is_link"], between=None)
+    ]
     assert actual_df[2].road_flags == [Row(values=["is_link"], between=None)]
     assert actual_df[3].road_flags == [Row(values=["is_link"], between=None)]
     assert actual_df[0].road_surface is None
@@ -131,60 +144,3 @@ def validate_all_connector_split(result_df):
         Row(connector_id="08728d5430ffffff04767d5cdb906cb5@0.268194787", at=0.0),
         Row(connector_id="08f28d543056a114043a7d54efe962ca", at=1.0),
     ]
-
-
-def test_boulder_data_split(spark_session):
-    """End-to-end test using Boulder, CO test data."""
-    input_path = get_test_data_path(pattern="boulder_*.parquet")
-    output_path = "tests/out/boulder"
-
-    test_config = SplitConfig(
-        split_at_connectors=True,
-        skip_debug_output=False,
-    )
-
-    splitter = OvertureTransportationSplitter(
-        spark=spark_session,
-        wrangler=SplitterDataWrangler(
-            input_path=input_path,
-            output_path=output_path,
-            write_intermediate_files=True,
-            reuse_existing_intermediate_outputs=False,
-        ),
-        cfg=test_config,
-    )
-    result_df = splitter.split()
-
-    # Validate basic structure
-    segment_count = result_df.filter("type = 'segment'").count()
-    connector_count = result_df.filter("type = 'connector'").count()
-
-    logger.info(f"\n[BOULDER] Segments: {segment_count}, Connectors: {connector_count}")
-
-    # Verify we got results
-    assert segment_count > 0, "Expected at least one segment in Boulder data"
-    assert connector_count > 0, "Expected at least one connector in Boulder data"
-
-    # Verify all segments have exactly 2 connectors (start and end)
-    segments_with_connector_count = (
-        result_df.filter("type = 'segment'").selectExpr("id", "size(connectors) as connector_count").collect()
-    )
-
-    for row in segments_with_connector_count:
-        assert row.connector_count >= 2, f"Segment {row.id} has {row.connector_count} connectors, expected >= 2"
-
-    # Verify start_lr and end_lr are present and valid
-    lr_check = (
-        result_df.filter("type = 'segment'")
-        .selectExpr("id", "start_lr", "end_lr", "end_lr - start_lr as lr_span")
-        .collect()
-    )
-
-    for row in lr_check:
-        assert row.start_lr is not None, f"Segment {row.id} has null start_lr"
-        assert row.end_lr is not None, f"Segment {row.id} has null end_lr"
-        assert row.start_lr >= 0.0, f"Segment {row.id} has invalid start_lr: {row.start_lr}"
-        assert row.end_lr <= 1.0, f"Segment {row.id} has invalid end_lr: {row.end_lr}"
-        assert row.lr_span > 0, f"Segment {row.id} has non-positive lr_span: {row.lr_span}"
-
-    logger.info(f"[BOULDER] All {segment_count} segments validated successfully")

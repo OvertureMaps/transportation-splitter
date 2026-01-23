@@ -38,7 +38,9 @@ def validate_split_results(result_df, test_name: str) -> tuple[int, int]:
     segment_count = result_df.filter("type = 'segment'").count()
     connector_count = result_df.filter("type = 'connector'").count()
 
-    logger.info(f"\n[{test_name}] Segments: {segment_count}, Connectors: {connector_count}")
+    logger.info(
+        f"\n[{test_name}] Segments: {segment_count}, Connectors: {connector_count}"
+    )
 
     # Verify we got results
     assert segment_count > 0, f"[{test_name}] Expected at least one segment"
@@ -61,7 +63,7 @@ class TestIntermediateFilesParquetWKB:
 
     def test_1_write_intermediate_parquet_wkb(self, spark_session):
         """Step 1: Write intermediate files in Parquet+WKB format."""
-        input_path = get_test_data_path(pattern="boulder_*.parquet")
+        input_path = get_test_data_path(pattern="boulder*.parquet")
         output_path = "tests/out/intermediate_parquet_wkb"
 
         splitter = OvertureTransportationSplitter(
@@ -78,7 +80,9 @@ class TestIntermediateFilesParquetWKB:
         )
         result_df = splitter.split()
 
-        segment_count, connector_count = validate_split_results(result_df, "WRITE-PARQUET-WKB")
+        segment_count, connector_count = validate_split_results(
+            result_df, "WRITE-PARQUET-WKB"
+        )
 
         # Store for comparison in subsequent tests
         TestIntermediateFilesParquetWKB.expected_segment_count = segment_count
@@ -86,7 +90,7 @@ class TestIntermediateFilesParquetWKB:
 
     def test_2_reuse_intermediate_output_parquet_wkb(self, spark_session):
         """Step 2: Reuse intermediate files, output as Parquet+WKB."""
-        input_path = get_test_data_path(pattern="boulder_*.parquet")
+        input_path = get_test_data_path(pattern="boulder*.parquet")
         output_path = "tests/out/intermediate_parquet_wkb"
 
         splitter = OvertureTransportationSplitter(
@@ -103,21 +107,27 @@ class TestIntermediateFilesParquetWKB:
         )
         result_df = splitter.split()
 
-        segment_count, connector_count = validate_split_results(result_df, "REUSE-PARQUET-WKB->PARQUET-WKB")
+        segment_count, connector_count = validate_split_results(
+            result_df, "REUSE-PARQUET-WKB->PARQUET-WKB"
+        )
 
         # Verify counts match the original run
-        assert segment_count == TestIntermediateFilesParquetWKB.expected_segment_count, (
+        assert (
+            segment_count == TestIntermediateFilesParquetWKB.expected_segment_count
+        ), (
             f"Segment count mismatch: got {segment_count}, "
             f"expected {TestIntermediateFilesParquetWKB.expected_segment_count}"
         )
-        assert connector_count == TestIntermediateFilesParquetWKB.expected_connector_count, (
+        assert (
+            connector_count == TestIntermediateFilesParquetWKB.expected_connector_count
+        ), (
             f"Connector count mismatch: got {connector_count}, "
             f"expected {TestIntermediateFilesParquetWKB.expected_connector_count}"
         )
 
     def test_3_reuse_intermediate_output_geoparquet(self, spark_session):
         """Step 3: Reuse Parquet+WKB intermediate files, output as GeoParquet."""
-        input_path = get_test_data_path(pattern="boulder_*.parquet")
+        input_path = get_test_data_path(pattern="boulder*.parquet")
         output_path = "tests/out/intermediate_parquet_wkb"
 
         splitter = OvertureTransportationSplitter(
@@ -134,14 +144,20 @@ class TestIntermediateFilesParquetWKB:
         )
         result_df = splitter.split()
 
-        segment_count, connector_count = validate_split_results(result_df, "REUSE-PARQUET-WKB->GEOPARQUET")
+        segment_count, connector_count = validate_split_results(
+            result_df, "REUSE-PARQUET-WKB->GEOPARQUET"
+        )
 
         # Verify counts match the original run
-        assert segment_count == TestIntermediateFilesParquetWKB.expected_segment_count, (
+        assert (
+            segment_count == TestIntermediateFilesParquetWKB.expected_segment_count
+        ), (
             f"Segment count mismatch: got {segment_count}, "
             f"expected {TestIntermediateFilesParquetWKB.expected_segment_count}"
         )
-        assert connector_count == TestIntermediateFilesParquetWKB.expected_connector_count, (
+        assert (
+            connector_count == TestIntermediateFilesParquetWKB.expected_connector_count
+        ), (
             f"Connector count mismatch: got {connector_count}, "
             f"expected {TestIntermediateFilesParquetWKB.expected_connector_count}"
         )
@@ -161,7 +177,7 @@ class TestIntermediateFilesGeoParquet:
 
     def test_4_write_intermediate_geoparquet(self, spark_session):
         """Step 4: Write intermediate files in GeoParquet format."""
-        input_path = get_test_data_path(pattern="boulder_*.parquet")
+        input_path = get_test_data_path(pattern="boulder*.parquet")
         output_path = "tests/out/intermediate_geoparquet"
 
         splitter = OvertureTransportationSplitter(
@@ -178,7 +194,9 @@ class TestIntermediateFilesGeoParquet:
         )
         result_df = splitter.split()
 
-        segment_count, connector_count = validate_split_results(result_df, "WRITE-GEOPARQUET")
+        segment_count, connector_count = validate_split_results(
+            result_df, "WRITE-GEOPARQUET"
+        )
 
         # Store for comparison in subsequent tests
         TestIntermediateFilesGeoParquet.expected_segment_count = segment_count
@@ -186,7 +204,7 @@ class TestIntermediateFilesGeoParquet:
 
     def test_5_reuse_intermediate_output_parquet_wkb(self, spark_session):
         """Step 5: Reuse GeoParquet intermediate files, output as Parquet+WKB."""
-        input_path = get_test_data_path(pattern="boulder_*.parquet")
+        input_path = get_test_data_path(pattern="boulder*.parquet")
         output_path = "tests/out/intermediate_geoparquet"
 
         splitter = OvertureTransportationSplitter(
@@ -203,21 +221,27 @@ class TestIntermediateFilesGeoParquet:
         )
         result_df = splitter.split()
 
-        segment_count, connector_count = validate_split_results(result_df, "REUSE-GEOPARQUET->PARQUET-WKB")
+        segment_count, connector_count = validate_split_results(
+            result_df, "REUSE-GEOPARQUET->PARQUET-WKB"
+        )
 
         # Verify counts match the original run
-        assert segment_count == TestIntermediateFilesGeoParquet.expected_segment_count, (
+        assert (
+            segment_count == TestIntermediateFilesGeoParquet.expected_segment_count
+        ), (
             f"Segment count mismatch: got {segment_count}, "
             f"expected {TestIntermediateFilesGeoParquet.expected_segment_count}"
         )
-        assert connector_count == TestIntermediateFilesGeoParquet.expected_connector_count, (
+        assert (
+            connector_count == TestIntermediateFilesGeoParquet.expected_connector_count
+        ), (
             f"Connector count mismatch: got {connector_count}, "
             f"expected {TestIntermediateFilesGeoParquet.expected_connector_count}"
         )
 
     def test_6_reuse_intermediate_output_geoparquet(self, spark_session):
         """Step 6: Reuse GeoParquet intermediate files, output as GeoParquet."""
-        input_path = get_test_data_path(pattern="boulder_*.parquet")
+        input_path = get_test_data_path(pattern="boulder*.parquet")
         output_path = "tests/out/intermediate_geoparquet"
 
         splitter = OvertureTransportationSplitter(
@@ -234,14 +258,20 @@ class TestIntermediateFilesGeoParquet:
         )
         result_df = splitter.split()
 
-        segment_count, connector_count = validate_split_results(result_df, "REUSE-GEOPARQUET->GEOPARQUET")
+        segment_count, connector_count = validate_split_results(
+            result_df, "REUSE-GEOPARQUET->GEOPARQUET"
+        )
 
         # Verify counts match the original run
-        assert segment_count == TestIntermediateFilesGeoParquet.expected_segment_count, (
+        assert (
+            segment_count == TestIntermediateFilesGeoParquet.expected_segment_count
+        ), (
             f"Segment count mismatch: got {segment_count}, "
             f"expected {TestIntermediateFilesGeoParquet.expected_segment_count}"
         )
-        assert connector_count == TestIntermediateFilesGeoParquet.expected_connector_count, (
+        assert (
+            connector_count == TestIntermediateFilesGeoParquet.expected_connector_count
+        ), (
             f"Connector count mismatch: got {connector_count}, "
             f"expected {TestIntermediateFilesGeoParquet.expected_connector_count}"
         )
