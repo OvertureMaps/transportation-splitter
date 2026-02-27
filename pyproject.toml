@@ -3,13 +3,16 @@ name = "transportation-splitter"
 version = "0.2.0"
 description = "Pyspark app for splitting Overture transportation segments to simplify consuming the data"
 authors = [
-    {name = "Cozmin Bantea", email = "ibantea@microsoft.com"},
     {name = "Brad Richardson", email = "bradrichardson@meta.com"},
     {name = "Jennings Anderson", email = "jenningsa@meta.com"},
+]
+maintainers = [
+    {name = "Adam Lastowka", email = "adam@overturemaps.org"},
 ]
 license = "MIT"
 readme = "README.md"
 requires-python = ">=3.10"
+keywords = ["geospatial", "transportation", "overture", "pyspark", "data-processing", "maps"]
 dependencies = [
     "pyproj>=3.6.1",
     "pyspark>=3.5,<3.6",
@@ -17,6 +20,11 @@ dependencies = [
     "shapely>=2.0",
     "pandas",
 ]
+
+[project.urls]
+Homepage = "https://overturemaps.org"
+Source = "https://github.com/OvertureMaps/transportation-splitter"
+Issues = "https://github.com/OvertureMaps/transportation-splitter/issues"
 
 [dependency-groups]
 dev = [
