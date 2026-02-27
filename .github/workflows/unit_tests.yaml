@@ -46,7 +46,7 @@ jobs:
       run: java -version
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v5
+      uses: astral-sh/setup-uv@v7
 
     - name: Install dependencies
       run: uv sync --group dev --group test
