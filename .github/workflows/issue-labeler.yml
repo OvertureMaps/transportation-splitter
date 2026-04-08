@@ -32,13 +32,13 @@ jobs:
           persist-credentials: false
 
       - name: Parse issue form
-        uses: stefanbuck/github-issue-parser@10dcc54158ba4c137713d9d69d70a2da63b6bda3 # v3
+        uses: stefanbuck/github-issue-parser@10dcc54158ba4c137713d9d69d70a2da63b6bda3 # v3.2.3
         id: issue-parser
         with:
           template-path: .github/ISSUE_TEMPLATE/${{ matrix.template }}
 
       - name: Set labels based on policy
-        uses: redhat-plumbers-in-action/advanced-issue-labeler@b80ae64e3e156e9c111b075bfa04b295d54e8e2e # main
+        uses: redhat-plumbers-in-action/advanced-issue-labeler@b80ae64e3e156e9c111b075bfa04b295d54e8e2e # v3.2.4
         with:
           issue-form: ${{ steps.issue-parser.outputs.jsonString }}
           template: ${{ matrix.template }}
@@ -67,7 +67,7 @@ jobs:
           template-path: .github/ISSUE_TEMPLATE/${{ matrix.template }}
 
       - name: Set labels based on policy
-        uses: redhat-plumbers-in-action/advanced-issue-labeler@b80ae64e3e156e9c111b075bfa04b295d54e8e2e # main
+        uses: redhat-plumbers-in-action/advanced-issue-labeler@b80ae64e3e156e9c111b075bfa04b295d54e8e2e # v3.2.4
         with:
           issue-form: ${{ steps.issue-parser.outputs.jsonString }}
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -95,7 +95,7 @@ jobs:
           template-path: .github/ISSUE_TEMPLATE/${{ matrix.template }}
 
       - name: Set labels based on policy
-        uses: redhat-plumbers-in-action/advanced-issue-labeler@b80ae64e3e156e9c111b075bfa04b295d54e8e2e # main
+        uses: redhat-plumbers-in-action/advanced-issue-labeler@b80ae64e3e156e9c111b075bfa04b295d54e8e2e # v3.2.4
         with:
           issue-form: ${{ steps.issue-parser.outputs.jsonString }}
           section: without-policy
