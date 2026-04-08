@@ -137,10 +137,10 @@ jobs:
       if: startsWith(github.ref, 'refs/tags/')
       run: |
         PRERELEASE_FLAG=""
-        if [[ "${{ github.ref }}" == *"-alpha"* ]] || [[ "${{ github.ref }}" == *"-beta"* ]] || [[ "${{ github.ref }}" == *"-rc"* ]]; then
+        if [[ "${GITHUB_REF}" == *"-alpha"* ]] || [[ "${GITHUB_REF}" == *"-beta"* ]] || [[ "${GITHUB_REF}" == *"-rc"* ]]; then
           PRERELEASE_FLAG="--prerelease"
         fi
-        gh release create "${{ github.ref_name }}" dist/* --generate-notes $PRERELEASE_FLAG
+        gh release create "${GITHUB_REF_NAME}" dist/* --generate-notes $PRERELEASE_FLAG
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -149,17 +149,20 @@ jobs:
       if: github.event_name == 'workflow_dispatch'
       run: |
         PRERELEASE_FLAG=""
-        if [[ "${{ github.event.inputs.release_type }}" == "prerelease" ]]; then
+        if [[ "${MANUAL_RELEASE_TYPE}" == "prerelease" ]]; then
           PRERELEASE_FLAG="--prerelease"
         fi
-        gh release create "${{ steps.release_tag.outputs.tag }}" dist/* \
-          --title "${{ steps.release_tag.outputs.name }}" \
-          --target "${{ github.sha }}" \
-          --notes "Pre-release build from branch \`${{ github.ref_name }}\`
+        gh release create "${MANUAL_RELEASE_TAG}" dist/* \
+          --title "${MANUAL_RELEASE_NAME}" \
+          --target "${GITHUB_SHA}" \
+          --notes "Pre-release build from branch \`${GITHUB_REF_NAME}\`
 
-        Commit: ${{ github.sha }}
+        Commit: ${GITHUB_SHA}
 
         ⚠️ This is a development pre-release and may not be stable." \
           $PRERELEASE_FLAG
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        MANUAL_RELEASE_TYPE: ${{ github.event.inputs.release_type }}
+        MANUAL_RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+        MANUAL_RELEASE_NAME: ${{ steps.release_tag.outputs.name }}
