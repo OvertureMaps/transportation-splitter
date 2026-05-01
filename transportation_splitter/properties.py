@@ -9,8 +9,9 @@ def normalize_names(names: dict | None) -> dict | None:
     (meaning they now cover the whole segment) are promoted:
     - Rules with variant='common' and language=None → promoted to names.primary
     - Rules with variant='common' and language=X   → promoted to names.common[X]
+      only when names.common does not already contain X
 
-    Promoted rules are removed from names.rules.  All other rules are kept as-is.
+    Rules that are promoted are removed from names.rules. All other rules are kept as-is.
     Returns the updated names dict, or the original dict if no changes are needed.
     """
     if names is None:
