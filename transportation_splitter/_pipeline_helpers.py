@@ -15,7 +15,7 @@ from transportation_splitter.config import (
 from transportation_splitter.geometry import get_length_bucket
 from transportation_splitter.linear_reference import apply_lr_scope
 from transportation_splitter.models import SplitSegment
-from transportation_splitter.properties import get_destinations, get_trs
+from transportation_splitter.properties import get_destinations, get_trs, normalize_names
 
 # Column name for pre-computed segment length using Sedona
 SEGMENT_LENGTH_COLUMN = "segment_length_meters"
@@ -198,6 +198,9 @@ def get_split_segment_dict(
             original_segment_length,
             lr_min_overlap_meters,
         )
+
+    if "names" in modified_segment_dict and modified_segment_dict["names"] is not None:
+        modified_segment_dict["names"] = normalize_names(modified_segment_dict["names"])
 
     if PROHIBITED_TRANSITIONS_COLUMN in modified_segment_dict:
         prohibited_transitions = modified_segment_dict.get(PROHIBITED_TRANSITIONS_COLUMN) or {}
