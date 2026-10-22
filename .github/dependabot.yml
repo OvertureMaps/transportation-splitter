@@ -21,3 +21,17 @@ updates:
       include: "scope"
     cooldown:
       default-days: 7
+
+  # Maintain Python dependencies (uv.lock)
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "bot"
+    commit-message:
+      prefix: "[CHORE](deps)"
+      include: "scope"
+    cooldown:
+      default-days: 7
