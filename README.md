@@ -98,11 +98,8 @@ from transportation_splitter import (
 # Initialize the splitter
 splitter = OvertureTransportationSplitter(
     spark=spark_session,
-    wrangler=SplitterDataWrangler(
-        input_path="path/to/data/*.parquet",
-        output_path="output/"
-    ),
-    cfg=SplitConfig()  # Uses defaults: split_at_connectors=False
+    wrangler=SplitterDataWrangler(input_path="path/to/data/*.parquet", output_path="output/"),
+    cfg=SplitConfig(),  # Uses defaults: split_at_connectors=False
 )
 
 # Run the splitting pipeline
@@ -113,11 +110,9 @@ result_df = splitter.split()
 splitter_filtered = OvertureTransportationSplitter(
     spark=spark_session,
     wrangler=SplitterDataWrangler(
-        input_path="path/to/data/*.parquet",
-        output_path="output/",
-        filter_wkt="POLYGON(...)"
+        input_path="path/to/data/*.parquet", output_path="output/", filter_wkt="POLYGON(...)"
     ),
-    cfg=SplitConfig(split_at_connectors=True)
+    cfg=SplitConfig(split_at_connectors=True),
 )
 result_df = splitter_filtered.split()
 ```
@@ -128,12 +123,12 @@ The `SplitConfig` dataclass controls the splitting behavior:
 
 ```python
 SplitConfig(
-    split_at_connectors=False,             # Split at all connectors along the segment (default: False)
-    lr_columns_to_include=[],              # Only consider these columns for LR splitting
-    lr_columns_to_exclude=[],              # Exclude these columns from LR splitting
-    point_precision=7,                     # Decimal places for split point coordinates
-    lr_split_point_min_dist_meters=0.01,   # Minimum distance between split points (1cm)
-    skip_debug_output=True,                # Skip expensive count()/show() operations (default: True)
+    split_at_connectors=False,  # Split at all connectors along the segment (default: False)
+    lr_columns_to_include=[],  # Only consider these columns for LR splitting
+    lr_columns_to_exclude=[],  # Exclude these columns from LR splitting
+    point_precision=7,  # Decimal places for split point coordinates
+    lr_split_point_min_dist_meters=0.01,  # Minimum distance between split points (1cm)
+    skip_debug_output=True,  # Skip expensive count()/show() operations (default: True)
 )
 ```
 
@@ -143,15 +138,15 @@ The `SplitterDataWrangler` handles I/O configuration and state management:
 from transportation_splitter import SplitterDataWrangler
 
 SplitterDataWrangler(
-    input_path="path/to/data/*.parquet",   # Input data path (glob patterns supported)
-    output_path="output/",                  # Output directory for results (None = in-memory only)
-    filter_wkt="POLYGON(...)",              # Optional spatial filter (WKT polygon)
-    write_geoparquet=True,                  # Output format: True=GeoParquet, False=Parquet+WKB
-    geometry_column="geometry",             # Geometry column name (for non-standard schemas)
-    write_intermediate_files=True,          # Write intermediate files for caching
+    input_path="path/to/data/*.parquet",  # Input data path (glob patterns supported)
+    output_path="output/",  # Output directory for results (None = in-memory only)
+    filter_wkt="POLYGON(...)",  # Optional spatial filter (WKT polygon)
+    write_geoparquet=True,  # Output format: True=GeoParquet, False=Parquet+WKB
+    geometry_column="geometry",  # Geometry column name (for non-standard schemas)
+    write_intermediate_files=True,  # Write intermediate files for caching
     reuse_existing_intermediate_outputs=True,  # Reuse cached intermediate files
-    compression="zstd",                     # Parquet compression codec
-    block_size=16 * 1024 * 1024,           # Parquet row group size (16MB default)
+    compression="zstd",  # Parquet compression codec
+    block_size=16 * 1024 * 1024,  # Parquet row group size (16MB default)
 )
 ```
 
@@ -182,14 +177,11 @@ The wrangler tracks these pipeline steps for caching:
 ```python
 splitter = OvertureTransportationSplitter(
     spark=spark_session,
-    wrangler=SplitterDataWrangler(
-        input_path="path/to/data/*.parquet",
-        output_path="output/"
-    ),
+    wrangler=SplitterDataWrangler(input_path="path/to/data/*.parquet", output_path="output/"),
     cfg=SplitConfig(
         split_at_connectors=False,  # Default behavior
-        lr_columns_to_include=["road_flags"]
-    )
+        lr_columns_to_include=["road_flags"],
+    ),
 )
 result_df = splitter.split()
 ```
@@ -199,11 +191,8 @@ result_df = splitter.split()
 ```python
 splitter = OvertureTransportationSplitter(
     spark=spark_session,
-    wrangler=SplitterDataWrangler(
-        input_path="path/to/data/*.parquet",
-        output_path="output/"
-    ),
-    cfg=SplitConfig(skip_debug_output=False)
+    wrangler=SplitterDataWrangler(input_path="path/to/data/*.parquet", output_path="output/"),
+    cfg=SplitConfig(skip_debug_output=False),
 )
 result_df = splitter.split()
 
@@ -225,10 +214,10 @@ When using `filter_wkt`, the splitter uses the pre-computed `bbox` struct column
 # The filter_df function uses bbox fields for Parquet predicate pushdown
 # This allows Spark to skip entire row groups and partition files
 bbox_filter = (
-    (col("bbox.xmin") <= filter_xmax) &
-    (col("bbox.xmax") >= filter_xmin) &
-    (col("bbox.ymin") <= filter_ymax) &
-    (col("bbox.ymax") >= filter_ymin)
+    (col("bbox.xmin") <= filter_xmax)
+    & (col("bbox.xmax") >= filter_xmin)
+    & (col("bbox.ymin") <= filter_ymax)
+    & (col("bbox.ymax") >= filter_ymin)
 )
 ```
 

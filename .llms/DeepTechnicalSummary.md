@@ -669,14 +669,19 @@ uv run pytest tests/unit/test_split.py::TestSplitter::test_split_line_all_cases 
 import pytest
 from transportation_splitter import SplitPoint, SplitSegment, apply_lr_on_split
 
-@pytest.mark.parametrize("case_label, input_lr, expected_result", [
-    ("basic_case", [0.0, 0.5], True),
-    ("edge_case", [0.5, 1.0], False),
-])
+
+@pytest.mark.parametrize(
+    "case_label, input_lr, expected_result",
+    [
+        ("basic_case", [0.0, 0.5], True),
+        ("edge_case", [0.5, 1.0], False),
+    ],
+)
 def test_my_lr_logic(case_label, input_lr, expected_result):
     split_segment = SplitSegment(...)
     result = apply_lr_on_split(input_lr, split_segment, 1000, 0.01)
     assert result[0] == expected_result
+
 
 # Integration test example (tests/integration/test_my_e2e.py)
 def test_my_pipeline(spark_session):
@@ -835,22 +840,18 @@ PySpark from PyPI only ships with **Scala 2.12**. Always use `_2.12` suffix for 
 from transportation_splitter import (
     # Main entry point
     OvertureTransportationSplitter,
-
     # Configuration
     SplitConfig,
     DEFAULT_CFG,
     DESTINATIONS_COLUMN,
     PROHIBITED_TRANSITIONS_COLUMN,
-
     # I/O handling
     SplitterDataWrangler,
     SplitterStep,
-
     # Domain models
     JoinedConnector,
     SplitPoint,
     SplitSegment,
-
     # Utility functions (for testing/profiling)
     get_length,
     split_line,
