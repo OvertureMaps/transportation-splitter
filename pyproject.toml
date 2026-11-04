@@ -15,7 +15,7 @@ requires-python = ">=3.10"
 keywords = ["geospatial", "transportation", "overture", "pyspark", "data-processing", "maps"]
 dependencies = [
     "pyproj>=3.6.1",
-    "pyspark>=3.5,<3.6",
+    "pyspark>=3.5,<4.3",
     "apache-sedona>=1.8.0",
     "shapely>=2.0",
     "pandas",
