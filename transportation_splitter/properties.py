@@ -1,4 +1,66 @@
-"""Property handling for turn restrictions and destinations."""
+"""Property handling for turn restrictions, destinations, and names."""
+
+
+def normalize_names(names: dict | None) -> dict | None:
+    """
+    Promote names.rules entries that cover an entire split segment to top-level name fields.
+
+    After applying LR scope filtering to a split segment, rules whose 'between' is None
+    (meaning they now cover the whole segment) are promoted:
+    - Rules with variant='common' and language=None → promoted to names.primary
+    - Rules with variant='common' and language=X   → promoted to names.common[X]
+      only when names.common does not already contain X
+
+    Rules that are promoted are removed from names.rules. All other rules are kept as-is.
+    Returns the updated names dict, or the original dict if no changes are needed.
+    """
+    if names is None:
+        return None
+
+    rules = names.get("rules")
+    if not rules:
+        return names
+
+    existing_common: dict[str, str] = names.get("common") or {}
+    remaining_rules = []
+    new_primary = None
+    new_common_additions: dict[str, str] = {}
+
+    for rule in rules:
+        variant = rule.get("variant")
+        language = rule.get("language")
+        between = rule.get("between")
+        value = rule.get("value")
+
+        # Only promote rules that cover the whole segment (between is None),
+        # have variant='common', and have a non-null value.
+        if variant == "common" and between is None and value is not None:
+            if language is None:
+                if new_primary is None:
+                    new_primary = value
+                    continue
+            elif language not in existing_common and language not in new_common_additions:
+                new_common_additions[language] = value
+                continue
+
+        remaining_rules.append(rule)
+
+    if new_primary is None and not new_common_additions:
+        return names
+
+    result = dict(names)
+
+    if new_primary is not None:
+        result["primary"] = new_primary
+
+    if new_common_additions:
+        merged = dict(existing_common)
+        merged.update(new_common_additions)
+        result["common"] = merged
+
+    result["rules"] = remaining_rules if remaining_rules else None
+
+    return result
 
 
 def get_trs(turn_restrictions, connectors: list[dict]) -> tuple:
